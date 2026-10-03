@@ -1,0 +1,13 @@
+amends "pkl:Project"
+
+import "../Release.pkl"
+
+package =
+  Release.metadata(
+    "contracts.fragments",
+    "The shapes that mean the same thing in more than one service: listener, probes, log, drain, TLS, PostgreSQL, NATS, object store, and the Helm platform block.",
+  )
+
+dependencies {
+  ["vocab"] = import("../vocab/PklProject")
+}
