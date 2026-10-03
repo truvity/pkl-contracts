@@ -14,7 +14,10 @@
 ///     final newline there, but a pattern with no `$` would, and `$` and `.` stop
 ///     at other line breaks in other engines, so every pattern is paired with a
 ///     refinement that refuses any of them (LF, CR, FF, VT, NEL, LS, PS);
-///   - a default is any JSON value, an object included.
+///   - a default is any JSON value, an object included;
+///   - a map keyed by an enum is a partial record: only the members it names;
+///   - a property whose name is not an identifier (`service-lib`) is a quoted key,
+///     and is read as `o["service-lib"]` where the module reads it.
 ///
 /// Every class and alias is exported twice, as the schema and as the type
 /// (`z.infer`), under one name. A reference between classes is lazy, so the
@@ -26,15 +29,48 @@ import "@model/Model.pkl"
 local function jsdoc(d: String?, indent: String): String =
   if (d == null) "" else "\(indent)/** \(d.replaceAll("*/", "*\\/").replaceAll("\n", " ")) */\n"
 
+/// One character of a string written inside double quotes in source: a quote, a
+/// backslash and every control character or line separator (a raw line feed ends
+/// a TypeScript or Python string) as an escape both languages read alike.
+local function escapeChar(c: String): String =
+  if (c == "\\")
+    "\\\\"
+  else if (c == "\"")
+    "\\\""
+  else if (c == "\n")
+    "\\n"
+  else if (c == "\r")
+    "\\r"
+  else if (c == "\t")
+    "\\t"
+  else
+    let (cp = c.codePoints.first)
+      if (cp < 32 || (cp >= 127 && cp <= 159) || cp == 8232 || cp == 8233)
+        "\\u" + cp.toRadixString(16).padStart(4, "0")
+      else
+        c
+
+/// A string as a double-quoted literal.
+local function quote(v: String): String = "\"" + v.chars.map((c) -> escapeChar(c)).join("") + "\""
+
 local function lit(v: Any): String =
   if (v is String)
-    "\"\(v.replaceAll("\\", "\\\\").replaceAll("\"", "\\\""))\""
+    quote(v)
   else if (v is List)
     "[\(v.map((e) -> lit(e)).join(", "))]"
   else if (v is Map)
     "{\(v.entries.map((e) -> "\(lit(e.first)): \(lit(e.second))").join(", "))}"
   else
     "\(v)"
+
+/// A property name as an object key: bare when it is an identifier, quoted
+/// when it is not (`service-lib`).
+local function key(name: String): String =
+  if (name.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*"))) name else lit(name)
+
+/// Reading property `name` of an object `o`.
+local function access(o: String, name: String): String =
+  if (name.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*"))) "\(o).\(name)" else "\(o)[\(lit(name))]"
 
 local function regex(r: String): String = "/\(r.replaceAll("/", "\\/"))/"
 
@@ -68,7 +104,9 @@ local function inner(n: Model.Node): String =
   else if (n.kind == "list")
     "z.array(\(expr(n.items)))"
   else if (n.kind == "map")
-    "z.record(\(expr(n.key)), \(expr(n.items)))"
+    // zod 4 reads a record keyed by an enum as exhaustive (every member needed),
+    // which a map is not: a partial record names the members it may have.
+    "z.\(if (n.key.kind == "enum") "partialRecord" else "record")(\(expr(n.key)), \(expr(n.items)))"
   else if (n.kind == "open")
     "z.looseObject({})"
       + (
@@ -84,7 +122,7 @@ local function inner(n: Model.Node): String =
 
 local function field(p: Model.Prop): String =
   jsdoc(p.doc, "  ")
-    + "  \(p.name): \(expr(p.type))"
+    + "  \(key(p.name)): \(expr(p.type))"
     + (
       if (p.hasDefault)
         ".default(\(lit(p.default)))"
@@ -116,7 +154,7 @@ local function classAliasDef(n: Model.Node): String =
       if (n.requiredWhen == null)
         ""
       else
-        ".refine((o) => !\(lit(n.requiredWhen.`in`.toList())).includes(o.\(n.requiredWhen.property)) || \(lit(n.requiredWhen.require.toList())).every((k) => (o as Record<string, unknown>)[k] !== undefined), { message: \"\(n.requiredWhen.require.join(", ")) required when \(n.requiredWhen.property) is \(n.requiredWhen.`in`.join(" or "))\" })"
+        ".refine((o) => !\(lit(n.requiredWhen.`in`.toList())).includes(\(access("o", n.requiredWhen.property))) || \(lit(n.requiredWhen.require.toList())).every((k) => (o as Record<string, unknown>)[k] !== undefined), { message: \"\(n.requiredWhen.require.join(", ")) required when \(n.requiredWhen.property) is \(n.requiredWhen.`in`.join(" or "))\" })"
     )
     + ";\n"
     + "export type \(n.alias) = z.infer<typeof \(n.alias)>;\n\n"
