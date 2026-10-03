@@ -7,6 +7,13 @@ under one version, so a heading covers all three.
 
 ## Unreleased
 
+### Releases
+
+- Patch releases are cut automatically: when merged changes have moved
+  master past the latest tag, a pull request gives the CHANGELOG its heading
+  and bumps the declared version in the same commit, and the tag follows its
+  merge. Minors and majors stay manual.
+
 ## v0.1.0 — 2026-10-03
 
 ### Packages

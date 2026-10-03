@@ -1,0 +1,41 @@
+# When merged changes have moved master past the latest release, the shared
+# workflow cuts the next patch tag. DOUBLY GUARDED, off by default: the
+# issuer must be configured for the organisation AND vars.AUTO_RELEASE must
+# be "true". It only ever cuts patches; minors and majors are manual tags.
+#
+# The version is declared in packages/Release.pkl and recorded in every
+# PklProject.deps.json, so the heading pull request also carries the bump:
+# version-bump-command rewrites Release.pkl to the version being cut and
+# re-resolves the projects, and the tag names the commit that declares it.
+# release.yaml then refuses any tag that is not the declared version.
+#
+# NO APP KEY HERE. The job exchanges its own GitHub identity token at the
+# access-roster issuer for an installation token of the catalogue App,
+# narrowed to this repository.
+name: Auto Release
+
+on:
+  schedule:
+    - cron: "43 6 * * 1"
+  workflow_dispatch:
+  # Security lane: a push whose merged PR carries renovate's `security`
+  # label releases immediately; every other push exits quietly in the
+  # shared workflow.
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+  id-token: write # the token exchange, in the shared workflow's job
+
+jobs:
+  tag:
+    if: vars.AUTO_RELEASE == 'true' && vars.ACCESS_ROSTER_ISSUER != ''
+    uses: truvity/ci-workflows/.github/workflows/auto-release.yaml@9a0fc9767de4ab78dee5d431f6973f91dffd1b32 # v3.23.0
+    with:
+      token-source: access-roster
+      access-roster-issuer: ${{ vars.ACCESS_ROSTER_ISSUER }}
+      github-app: truvity-ci-automation
+      version-bump-command: >-
+        sed -i "s/^version = \".*\"/version = \"$VERSION\"/" packages/Release.pkl
+        && just resolve
