@@ -1,0 +1,6 @@
+alerts:
+  remote:
+    enabled: true
+export:
+  target:
+    kind: none

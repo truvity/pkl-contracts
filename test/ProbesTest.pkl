@@ -12,11 +12,13 @@ import "pkl:reflect"
 import "@model/Model.pkl"
 import "@vocab/Vocab.pkl"
 
+import "conformance/contract/Conditions.pkl"
 import "Load.pkl"
 import "Probes.pkl"
 import "Showcase.pkl"
 
 local root = Model.moduleNode(Showcase)
+local conditions = Probes.conditions(Model.moduleNode(Conditions))
 local renderer = new JsonRenderer {}
 
 /// Loads a one-property document into the showcase and forces all of it; an
@@ -42,6 +44,20 @@ facts {
           // `catch` evaluates to the error message, and fails the fact when there is none.
           module.catch(() -> load(prop, pr.value)).length > 0
         }
+      }
+    }
+  }
+  ["the rules across fields of the conformance contract are probed, and Pkl agrees with each"] {
+    // Both branches of every rule, the absent one, each requirement missing alone.
+    conditions.length > 20
+    conditions.any((pr) -> pr.label == "ok") && conditions.any((pr) -> pr.label == "bad")
+  }
+  for (i, pr in conditions) {
+    ["conditions \(i): \(pr.label), \(pr.why)"] {
+      when (pr.label == "ok") {
+        renderer.renderValue(Load.load(Conditions, pr.value)).length > 0
+      } else {
+        module.catch(() -> renderer.renderValue(Load.load(Conditions, pr.value))).length > 0
       }
     }
   }

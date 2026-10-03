@@ -26,9 +26,10 @@ import (
 	yaml "go.yaml.in/yaml/v3"
 
 	"conformance.invalid/gen/blocks"
+	"conformance.invalid/gen/conditions"
 	"conformance.invalid/gen/installed"
-	"conformance.invalid/gen/logarchiver"
 	"conformance.invalid/gen/literals"
+	"conformance.invalid/gen/logarchiver"
 	"conformance.invalid/gen/migrate"
 	"conformance.invalid/gen/names"
 	"conformance.invalid/gen/platform"
@@ -44,7 +45,7 @@ import (
 
 type entry struct {
 	ID, Schema, Path, Label, SchemaPath string
-	Typed, SelfContained                 bool
+	Typed, SelfContained                bool
 }
 type doc struct{ Schema, Module string }
 
@@ -57,21 +58,22 @@ type result struct {
 
 // The struct each document decodes into.
 var structs = map[string]func() any{
-	"web":       func() any { return &web.WebImpl{} },
-	"urls":      func() any { return &urls.UrlsImpl{} },
-	"redirect":  func() any { return &redirect.RedirectImpl{} },
-	"stat":      func() any { return &stat.StatImpl{} },
-	"prober":    func() any { return &prober.ProberImpl{} },
-	"migrate":   func() any { return &migrate.Migrate{} },
-	"log":       func() any { return &logarchiver.LogArchiverImpl{} },
-	"shortener": func() any { return &shortener.ShortenerImpl{} },
-	"installed": func() any { return &installed.InstalledImpl{} },
-	"blocks":    func() any { return &blocks.Blocks{} },
-	"names":     func() any { return &names.Names{} },
-	"literals":  func() any { return &literals.Literals{} },
-	"union":     func() any { return &union.Union{} },
-	"platform":  func() any { return &platform.Platform{} },
-	"showcase":  func() any { return &showcase.Showcase{} },
+	"web":        func() any { return &web.WebImpl{} },
+	"urls":       func() any { return &urls.UrlsImpl{} },
+	"redirect":   func() any { return &redirect.RedirectImpl{} },
+	"stat":       func() any { return &stat.StatImpl{} },
+	"prober":     func() any { return &prober.ProberImpl{} },
+	"migrate":    func() any { return &migrate.Migrate{} },
+	"log":        func() any { return &logarchiver.LogArchiverImpl{} },
+	"shortener":  func() any { return &shortener.ShortenerImpl{} },
+	"installed":  func() any { return &installed.InstalledImpl{} },
+	"blocks":     func() any { return &blocks.Blocks{} },
+	"conditions": func() any { return &conditions.Conditions{} },
+	"names":      func() any { return &names.Names{} },
+	"literals":   func() any { return &literals.Literals{} },
+	"union":      func() any { return &union.Union{} },
+	"platform":   func() any { return &platform.Platform{} },
+	"showcase":   func() any { return &showcase.Showcase{} },
 }
 
 func must(err error) {

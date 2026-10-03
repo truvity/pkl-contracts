@@ -164,6 +164,102 @@ facts {
       .catch(() -> Model.declNode(LintFixtures, "EmptyBound").cls.props.first.type.range)
       .contains("leave no value")
   }
+  ["an exclusive bound is normalised, and a range that leaves no value is refused"] {
+    local ranges = Model.declNode(LintFixtures, "TightenedExclusive").cls.props
+    // The type's `min = 0` is dropped for the property's `exclusiveMin = 0`.
+    ranges.first.type.range.min == null
+    ranges.first.type.range.exclusiveMin == 0
+    ranges.first.type.range.max == 1
+    // Of two spellings of one end the stricter stays.
+    ranges.last.type.range.min == null
+    ranges.last.type.range.exclusiveMin == 0
+    ranges.last.type.range.max == 1
+    ranges.last.type.range.exclusiveMax == null
+    module
+      .catch(() -> Model.declNode(LintFixtures, "EmptyExclusive").cls.props.first.type.range)
+      .contains("leave no value")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "CrossedExclusive").cls.props.first.type.range)
+      .contains("leave no value")
+  }
+  ["@DenyKeys is for a map or an open object"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "DenyOnString").cls.props.length)
+      .contains("@DenyKeys is for a map or an open object")
+  }
+  ["a rule across fields is resolved against the contract, and what cannot be is a generation error"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "UnknownPath").cls.conditions.length)
+      .contains("`typo.value` names no property")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ThroughScalar").cls.conditions.length)
+      .contains("goes through `value`, which is NonEmptyString and not a block")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ConditionOnString").cls.conditions.length)
+      .contains("a condition is on a boolean or an enum")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "UnknownMember").cls.conditions.length)
+      .contains("a value `mode` cannot hold")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "StringForBoolean").cls.conditions.length)
+      .contains("lists booleans")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "DefaultInTheList").cls.conditions.length)
+      .contains("defaults to true")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "RequiredWithDefault").cls.conditions.length)
+      .contains("has a default, so it is always present to Pkl")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ThroughDefaultedBlock").cls.conditions.length)
+      .contains("has a default of its own")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "NothingRequired").cls.conditions.length)
+      .contains("`require` names nothing")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "RuleOnAliasOfString").cls.props.length)
+      .contains("for an alias of a class")
+  }
+  ["a sound rule is read in full: both kinds, nested paths, the converse"] {
+    local conds = Model.declNode(LintFixtures, "Sound").cls.conditions
+    conds.length == 2
+    conds.first.unless == false
+    conds.first.path == List("inner", "mode")
+    conds.first.values == List("a", "b")
+    conds.first.paths == List(List("inner", "value"), List("other", "x"), List("other", "y"))
+    conds.last.unless
+    conds.last.values == List(true)
+  }
+  ["a rule across fields is enforced by Pkl on a class and a module, with the paths in the message"] {
+    Check.problems(new LintFixtures.Sound {}).length == 1
+    Check
+      .problems(new LintFixtures.Sound { inner = new LintFixtures.SoundInner { value = "v" } })
+      .isEmpty
+    Check
+      .problems(new LintFixtures.Sound {
+        inner = new LintFixtures.SoundInner { mode = "a"; value = "v" }
+        other = new LintFixtures.SoundOther { x = "x" }
+      })
+      .length == 1
+    Check
+      .problems(new LintFixtures.Sound {
+        inner = new LintFixtures.SoundInner { mode = "a"; value = "v" }
+        other = new LintFixtures.SoundOther { x = "x"; y = "y" }
+      })
+      .isEmpty
+    module
+      .catch(() -> Check.checked(new LintFixtures.Sound {}))
+      .contains("`inner.value` is required unless `flag` is `true`")
+    Check.problems(new LintFixtures.Sound { flag = true }).isEmpty
+  }
+  ["denied keys and exclusive bounds are enforced by Pkl"] {
+    Check.problems((Showcase) { labels { ["severity"] = "x" } }).length == 1
+    Check.problems((Showcase) { labels { ["team"] = "x" } }).isEmpty
+    Check.problems((Showcase) { anyButKind { kind = "x" } }).length == 1
+    Check.problems((Showcase) { openRatio = 0 }).length == 1
+    Check.problems((Showcase) { openRatio = 0.001 }).isEmpty
+    Check.problems((Showcase) { halfOpen = 1 }).length == 1
+    Check.problems((Showcase) { halfOpen = 0 }).isEmpty
+  }
   ["an object's default is the property's own when it differs from the class's, and Pkl's when it does not"] {
     local props = Model.declNode(LintFixtures, "Defaults").cls.props
     props.find((p) -> p.name == "resources").hasDefault

@@ -1,0 +1,4 @@
+alerts:
+  remote:
+    enabled: true
+mode: standalone
