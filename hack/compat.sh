@@ -10,8 +10,9 @@
 # The release is built in a temporary worktree. It has no generators, so this
 # checkout's are laid over it (the packages that generate; the release's
 # vocabulary, fragments and templates are its own). A breaking change that is meant (a new major, or a minor
-# before 1.0 that says so) passes when the CHANGELOG's `## Unreleased` section
-# mentions it with the word "breaking".
+# before 1.0 that says so) passes when the CHANGELOG declares it with an entry
+# beginning "- **Breaking": under `## Unreleased`, or, in the pull request that
+# names the release, under that release's own `## vX.Y.Z` heading.
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$here"
@@ -44,11 +45,18 @@ report="$tmp/report.txt"
 bin/pkl run --project-dir test packages/jsonschema/Compat.pkl -- --before "$tmp/before" --after "$tmp/after" | tee "$report"
 echo "compat: this checkout against $tag"
 
+# The section that may declare a break: `## Unreleased` between releases, and,
+# in the pull request that names a release (packages/Release.pkl newer than
+# $tag), that release's own `## vX.Y.Z` heading, where the entries now sit.
+declared="v$(sed -n 's/^version = "\(.*\)"$/\1/p' packages/Release.pkl)"
+sections="Unreleased"
+[ "$declared" != "$tag" ] && sections="Unreleased|$declared"
+
 if grep -q '^BREAKING' "$report"; then
-  if awk '/^## Unreleased/{f=1;next} /^## /{f=0} f' CHANGELOG.md | grep -q '^- \*\*Breaking'; then
-    echo "compat: breaking changes, and the CHANGELOG's Unreleased section says so"
+  if awk -v re="^## ($sections)( |$)" '$0 ~ re {f=1;next} /^## /{f=0} f' CHANGELOG.md | grep -q '^- \*\*Breaking'; then
+    echo "compat: breaking changes, and the CHANGELOG says so (## $sections)"
     exit 0
   fi
-  echo "compat: breaking changes against $tag; say so in the CHANGELOG (an entry that begins \"- **Breaking\" under '## Unreleased') if they are meant" >&2
+  echo "compat: breaking changes against $tag; say so in the CHANGELOG (an entry that begins \"- **Breaking\" under '## Unreleased', or under '## $declared' in its release) if they are meant" >&2
   exit 1
 fi
