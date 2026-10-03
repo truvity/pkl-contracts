@@ -331,8 +331,13 @@ typealias CspMode = "off" | "report-only" | "enforce"
 /// When a container image is pulled.
 typealias PullPolicy = "Always" | "IfNotPresent" | "Never"
 
-/// The protocol OpenTelemetry exports over.
-typealias OtelProtocol = "grpc" | "http/protobuf" | "http/json"
+/// The protocol OpenTelemetry exports over. `http/json` is absent on purpose: it is
+/// in the OpenTelemetry specification, but the Go SDK's exporter selection
+/// (`autoexport`) refuses it at startup and its HTTP exporter always sends
+/// protobuf, and the Python and TypeScript exporters are fixed to HTTP/protobuf, so
+/// a contract that admitted it would admit a value that stops a service from
+/// starting.
+typealias OtelProtocol = "grpc" | "http/protobuf"
 
 // ------------------------------------------------------------- open objects
 
