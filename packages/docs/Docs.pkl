@@ -27,6 +27,7 @@ local function propRow(p: Model.Prop): List<String> =
         + (if (p.secret) "**Names a secret.** " else "")
         + (p.doc ?? ""),
     ),
+    if (p.setAtInstall) "yes" else "",
   )
 
 local function classSection(c: Model.Cls, n: Model.Node): String =
@@ -49,7 +50,15 @@ local function classSection(c: Model.Cls, n: Model.Node): String =
         "No fields of its own.\n\n"
       else
         table(
-          List("Field", "Type", "Required", "Default", "Constraints", "Description"),
+          List(
+            "Field",
+            "Type",
+            "Required",
+            "Default",
+            "Constraints",
+            "Description",
+            "Set at install",
+          ),
           c.props.map((p) -> propRow(p)),
         ) + "\n"
     )

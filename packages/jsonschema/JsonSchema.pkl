@@ -15,9 +15,15 @@
 ///     class that means the same in ECMAScript, RE2, Python and Java;
 ///   - a default is any value, an object included: a property's `default` is the
 ///     JSON of the default the contract gives it;
-///   - a property that is set at install is in `required` and has no default;
+///   - a property that is set at install is in `required` and has no default, and
+///     says so with `x-set-at-install: true` (an annotation: a validator ignores
+///     it, a tool reads it instead of parsing the description);
 ///   - an integral float is an integer: `type: integer` says so;
-///   - a field with a default is optional: it is not in `required`;
+///   - a field with a default is optional: it is not in `required`. So is an object
+///     whose class gives every field a default, or leaves it nullable, or holds
+///     only such objects (Pkl builds it when the document leaves it out): its
+///     `default` is that instance, rendered whole, because a validator does not
+///     fill a default in and a reader must still find what it will be;
 ///   - `null` is not a value for an optional field: a property's type does not
 ///     include `null`, so `null` is a type error.
 module contracts.jsonschema.JsonSchema
@@ -71,6 +77,9 @@ local function body(n: Model.Node): Dynamic =
       when (n.key.pattern != null) {
         propertyNames = new Dynamic { pattern = n.key.pattern.regex; not = noLineBreak }
       }
+      when (n.key.kind == "enum") {
+        propertyNames = new Dynamic { `enum` = n.key.values }
+      }
       when (n.items.kind != "any") { additionalProperties = ofNode(n.items) }
     }
   else if (n.kind == "open")
@@ -78,26 +87,51 @@ local function body(n: Model.Node): Dynamic =
       when (n.requiresKeys != null) { required = n.requiresKeys.keys.toList() }
     }
   else if (n.kind == "union")
+    // `type: [...]` says only what each member IS, so it serves members that are a
+    // plain scalar (or an open object with nothing required). A list, a map, an
+    // enum, a class or anything with a constraint on it needs its own schema, or
+    // the items, the keys and the bound are lost and the union accepts more than
+    // the contract does.
     if (
       n.members.every((m) ->
         m.pattern == null
           && m.range == null
           && m.length == null
+          && m.format == null
+          && m.requiresKeys == null
           && m.kind != "enum"
           && m.kind != "object"
+          && m.kind != "list"
+          && m.kind != "map"
+          && m.kind != "any"
       )
     )
       new Dynamic { type = n.members.map((m) -> body(m).type) }
     else
       new Dynamic { anyOf = n.members.map((m) -> ofNode(m)) }
   else if (n.kind == "object")
-    objectBody(n.cls, "additionalProperties")
+    (objectBody(n.cls, "additionalProperties")) {
+      when (n.requiredWhen != null) { allOf = List(conditional(n.requiredWhen)) }
+    }
   else
     new Dynamic {}
+
+/// A rule across fields (`@RequiredWhen`): when `property` is one of `in`, the
+/// `require`d ones must be there.
+local function conditional(r: Dynamic): Dynamic = new Dynamic {
+  `if` = new Dynamic {
+    properties = new Dynamic {
+      [r.property] = new Dynamic { `enum` = r.`in`.toList() }
+    }
+    required = List(r.property)
+  }
+  then = new Dynamic { required = r.require.toList() }
+}
 
 local function propSchema(p: Model.Prop): Dynamic = (ofNode(p.type)) {
   when (p.doc != null) { description = p.doc }
   when (p.hasDefault) { ["default"] = p.default }
+  when (p.setAtInstall) { ["x-set-at-install"] = true }
 }
 
 /// The `type: object` part of a class: its properties, which are required,
@@ -155,17 +189,7 @@ function documentIn(n: Model.Node, standalone: Boolean): Dynamic =
               if (n.requiredWhen == null)
                 List()
               else
-                List(new Dynamic {
-                  `if` = new Dynamic {
-                    properties = new Dynamic {
-                      [n.requiredWhen.property] = new Dynamic {
-                        `enum` = n.requiredWhen.`in`.toList()
-                      }
-                    }
-                    required = List(n.requiredWhen.property)
-                  }
-                  then = new Dynamic { required = n.requiredWhen.require.toList() }
-                })
+                List(conditional(n.requiredWhen))
             )
       }
       ...inner

@@ -70,7 +70,7 @@ local function rows(prefix: String, p: Model.Prop, within: Boolean): List<Row> =
       List(new Row {
         path = dotted
         type = Model.typeLabel(t)
-        default = if (p.hasDefault) "`\(Model.literal(p.default))`" else ""
+        default = if (p.hasDefault) "`\(Model.literal(p.default).replaceAll("|", "\\|"))`" else ""
         required = within && p.required
         setAtInstall = p.setAtInstall
         doc = firstParagraph(p.doc)
