@@ -192,7 +192,8 @@ for m in re.finditer(r"^### `(\w+)`\n(.*?)(?=^#|\Z)", md, re.S | re.M):
         cells = re.split(r"(?<!\\)\|", r.group(0))
         cell = cells[4].strip()
         if cell:
-            rows[r.group(1)] = json.loads(cell.strip("`"))
+            # A bar in a default is written `\|` so that it is not a cell separator.
+            rows[r.group(1)] = json.loads(cell.strip("`").replace("\\|", "|"))
     docs[m.group(1)] = rows
 
 for qname, want in expected["classes"].items():

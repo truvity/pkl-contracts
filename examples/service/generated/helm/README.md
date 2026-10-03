@@ -69,6 +69,15 @@
 | `config.archive.bucket` | NonEmptyString |  | **Set at install.** The bucket. Every install names its own, so the defaults leave it out and the schema requires it. |
 | `config.archive.prefix` | NonEmptyString | `"echo/requests"` | What every object's key begins with. |
 | `config.archive.batchSeconds` | PositiveInt | `60` | How often a batch is written, in seconds: not more often than every ten. |
+| `config.alerts.remote.enabled` | boolean | `false` | Whether the install only renders the rules, for another cluster to evaluate. |
+| `config.alerts.holdFor` | PromDuration | `"10m"` | How long a condition holds before it fires. |
+| `config.alerts.errorRatio` | Ratio | `0.05` | The share of requests that may fail before it fires: more than none, at most all of them. |
+| `config.alerts.latencySeconds` | number | `0.5` | The slowest a request may be, in seconds: more than zero. |
+| `config.alerts.codes` | StatusCodeList | `"INTERNAL\|UNAVAILABLE"` | The status codes that count as failures, joined by a bar. |
+| `config.alerts.namespace` | DnsLabel |  | The namespace the rules are evaluated in. Absent means the install's own. |
+| `config.alerts.tls` | GatewayTlsMode | `"off"` | How the rules' gateway treats mutual TLS. |
+| `config.alerts.alertLabels` | map of NonEmptyString | `{}` | Labels put on every alert. `severity` is the rules' own and may not be set here. |
+| `config.alerts.receiver.url` | NonEmptyString |  | The receiver's URL. |
 | `config.client.timeoutSeconds` | PositiveInt | `5` | How long one call may take, in seconds. |
 | `config.client.retry.attempts` | PositiveInt | `3` | How many attempts in all. |
 | `config.client.retry.idempotentOnly` | boolean | `true` | Whether a call that is not safe to repeat is repeated too. |

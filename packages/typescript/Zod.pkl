@@ -17,7 +17,12 @@
 ///   - a default is any JSON value, an object included;
 ///   - a map keyed by an enum is a partial record: only the members it names;
 ///   - a property whose name is not an identifier (`service-lib`) is a quoted key,
-///     and is read as `o["service-lib"]` where the module reads it.
+///     and is read as `at(o, ["service-lib"])` where the module reads it;
+///   - a rule across fields (`@RequiredWhen`, `@RequiredUnless`) is a
+///     `superRefine`, which reads a dotted path through `at` (absent on the way
+///     is absent) and reports each missing path at that path;
+///   - `@DenyKeys` is a `refine` that refuses an own key on the list;
+///   - an exclusive bound is `.gt()` or `.lt()`.
 ///
 /// Every class and alias is exported twice, as the schema and as the type
 /// (`z.infer`), under one name. A reference between classes is lazy, so the
@@ -77,6 +82,15 @@ local function regex(r: String): String = "/\(r.replaceAll("/", "\\/"))/"
 local function range(n: Model.Node): String =
   (if (n.range?.min != null) ".min(\(n.range.min))" else "")
     + (if (n.range?.max != null) ".max(\(n.range.max))" else "")
+    + (if (n.range?.exclusiveMin != null) ".gt(\(n.range.exclusiveMin))" else "")
+    + (if (n.range?.exclusiveMax != null) ".lt(\(n.range.exclusiveMax))" else "")
+
+/// A refinement that refuses the keys `@DenyKeys` lists, or nothing.
+local function denied(n: Model.Node): String =
+  if (n.denyKeys == null)
+    ""
+  else
+    ".refine((o) => ![\(n.denyKeys.map((k) -> lit(k)).join(", "))].some((k) => Object.prototype.hasOwnProperty.call(o, k)), { message: \(lit("must not have the key " + n.denyKeys.map((k) -> "`\(k)`").join(" or "))) })"
 
 /// The zod expression for a node, referring to aliases and classes by name.
 local function expr(n: Model.Node): String =
@@ -107,6 +121,7 @@ local function inner(n: Model.Node): String =
     // zod 4 reads a record keyed by an enum as exhaustive (every member needed),
     // which a map is not: a partial record names the members it may have.
     "z.\(if (n.key.kind == "enum") "partialRecord" else "record")(\(expr(n.key)), \(expr(n.items)))"
+      + denied(n)
   else if (n.kind == "open")
     "z.looseObject({})"
       + (
@@ -115,6 +130,7 @@ local function inner(n: Model.Node): String =
         else
           ".refine((o) => [\(n.requiresKeys.keys.toList().map((k) -> lit(k)).join(", "))].every((k) => k in o))"
       )
+      + denied(n)
   else if (n.kind == "union")
     "z.union([\(n.members.map((m) -> expr(m)).join(", "))])"
   else
@@ -133,13 +149,43 @@ local function field(p: Model.Prop): String =
     )
     + ",\n"
 
+/// The rules across fields of `c` and of the classes it extends, the base's
+/// first: a class is spread from its base's shape, which carries no refinement.
+local function allConditions(c: Model.Cls): List<Model.Condition> =
+  (if (c.base != null) allConditions(c.base.cls) else List()) + c.conditions
+
+/// A path as an array of keys.
+local function pathLit(p: List<String>): String = "[\(p.map((k) -> lit(k)).join(", "))]"
+
+/// The refinements for rules across fields: one `superRefine` that reads each
+/// condition's path and, where the rule applies, reports every required path
+/// that is absent, at that path.
+local function conditionRefine(conds: List<Model.Condition>): String =
+  if (conds.isEmpty)
+    ""
+  else
+    ".superRefine((o, ctx) => {\n"
+      + conds
+        .map((d) ->
+          "    if (\(if (d.unless) "!" else "")(\(lit(d.values)) as unknown[]).includes(at(o, \(pathLit(d.path))))) {\n"
+            + "      for (const p of \(pathLit2(d.paths))) {\n"
+            + "        if (at(o, p) === undefined) ctx.addIssue({ code: \"custom\", path: p, message: \(lit(Model.conditionPhrase(d))) });\n"
+            + "      }\n"
+            + "    }\n"
+        )
+        .join("")
+      + "  })"
+
+local function pathLit2(ps: List<List<String>>): String =
+  "[\(ps.map((p) -> pathLit(p)).join(", "))]"
+
 local function classDef(c: Model.Cls): String =
   jsdoc(c.doc, "")
     + "export const \(c.qname)_shape = {\n"
     + (if (c.base != null) "  ...\(c.base.cls.qname)_shape,\n" else "")
     + c.props.map((p) -> field(p)).join("")
     + "};\n"
-    + "export const \(c.qname) = z.\(if (c.isOpen) "looseObject" else "strictObject")(\(c.qname)_shape);\n"
+    + "export const \(c.qname) = z.\(if (c.isOpen) "looseObject" else "strictObject")(\(c.qname)_shape)\(conditionRefine(allConditions(c)));\n"
     + "export type \(c.qname) = z.infer<typeof \(c.qname)>;\n\n"
 
 local function aliasDef(n: Model.Node): String =
@@ -150,12 +196,7 @@ local function aliasDef(n: Model.Node): String =
 local function classAliasDef(n: Model.Node): String =
   jsdoc(n.doc, "")
     + "export const \(n.alias) = \(n.cls.qname)"
-    + (
-      if (n.requiredWhen == null)
-        ""
-      else
-        ".refine((o) => !\(lit(n.requiredWhen.`in`.toList())).includes(\(access("o", n.requiredWhen.property))) || \(lit(n.requiredWhen.require.toList())).every((k) => (o as Record<string, unknown>)[k] !== undefined), { message: \"\(n.requiredWhen.require.join(", ")) required when \(n.requiredWhen.property) is \(n.requiredWhen.`in`.join(" or "))\" })"
-    )
+    + conditionRefine(n.conditions)
     + ";\n"
     + "export type \(n.alias) = z.infer<typeof \(n.alias)>;\n\n"
 
@@ -165,6 +206,16 @@ local header: String =
   import { z } from "zod";
 
   const noLineBreak = (s: string): boolean => !/[\\n\\r\\f\\v\\u0085\\u2028\\u2029]/.test(s);
+
+  // The value at a path through blocks; absent on the way is absent.
+  const at = (o: unknown, path: string[]): unknown => {
+    let v: unknown = o;
+    for (const k of path) {
+      if (v === null || v === undefined) return undefined;
+      v = (v as Record<string, unknown>)[k];
+    }
+    return v;
+  };
 
 
   """

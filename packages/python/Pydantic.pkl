@@ -20,6 +20,12 @@
 ///   - a default is any JSON value: an object default of an open object is a
 ///     plain `dict`, and one of a class is built through that class, so that it
 ///     is the model and not a dictionary;
+///   - a rule across fields (`@RequiredWhen`, `@RequiredUnless`) is a
+///     `model_validator(mode="after")` that reads each dotted path through `_at`
+///     (absent on the way is absent); one per class, named for the class so that
+///     a subclass adds to its base's instead of replacing it;
+///   - `@DenyKeys` is an `AfterValidator` that refuses a key on the list;
+///   - an exclusive bound is `Field(gt=...)` or `Field(lt=...)`;
 ///   - a property whose name is not a usable attribute (`service-lib`, a Python
 ///     keyword such as `global`, a leading underscore or digit) is declared
 ///     under a safe name with
@@ -169,16 +175,28 @@ local function inner(n: Model.Node): String =
   else if (n.kind == "list")
     "list[\(ann(n.items))]"
   else if (n.kind == "map")
-    "dict[\(ann(n.key)), \(ann(n.items))]"
+    dict("dict[\(ann(n.key)), \(ann(n.items))]", n)
   else if (n.kind == "open")
-    if (n.requiresKeys == null)
-      "dict[str, Any]"
-    else
-      "Annotated[dict[str, Any], AfterValidator(_has_keys(\(lit(n.requiresKeys.keys.toList()))))]"
+    dict("dict[str, Any]", n)
   else if (n.kind == "union")
     n.members.map((m) -> ann(m)).join(" | ")
   else
     "Any"
+
+/// A dictionary type with the validators its node asks for: the keys it must
+/// carry (`@RequiresKeys`) and the ones it must not (`@DenyKeys`).
+local function dict(base: String, n: Model.Node): String =
+  let (
+    vs =
+      List(
+        if (n.requiresKeys != null)
+          "AfterValidator(_has_keys(\(lit(n.requiresKeys.keys.toList()))))"
+        else
+          null,
+        if (n.denyKeys != null) "AfterValidator(_deny_keys(\(lit(n.denyKeys))))" else null,
+      ).filterNonNull()
+  )
+    if (vs.isEmpty) base else "Annotated[\(base), \(vs.join(", "))]"
 
 local function range(n: Model.Node): String =
   if (n.range == null)
@@ -188,6 +206,8 @@ local function range(n: Model.Node): String =
       List(
         if (n.range.min != null) "ge=\(n.range.min)" else null,
         if (n.range.max != null) "le=\(n.range.max)" else null,
+        if (n.range.exclusiveMin != null) "gt=\(n.range.exclusiveMin)" else null,
+        if (n.range.exclusiveMax != null) "lt=\(n.range.exclusiveMax)" else null,
       ),
     )))"
 
@@ -233,6 +253,24 @@ local function classDef(c: Model.Cls): String =
   else
     classBody(c)
 
+/// The `model_validator` of one class (or alias) for its rules across fields, or
+/// nothing. Named for `owner`: a subclass's validator must not replace its base's.
+local function conditional(owner: String, conds: List<Model.Condition>): String =
+  if (conds.isEmpty)
+    ""
+  else
+    "\n    @model_validator(mode=\"after\")\n"
+      + "    def _conditional_\(owner)(self) -> \"\(owner)\":\n"
+      + conds
+        .map((d) ->
+          "        if _at(self, \(lit(d.path.map((k) -> pyName(k))))) \(if (d.unless) "not in" else "in") \(lit(d.values)):\n"
+            + "            missing = [\".\".join(p) for p in \(lit(d.paths.map((p) -> p.map((k) -> pyName(k))))) if _at(self, p) is None]\n"
+            + "            if missing:\n"
+            + "                raise ValueError(\(lit(Model.conditionPhrase(d) + ": missing ")) + \", \".join(missing))\n"
+        )
+        .join("")
+      + "        return self\n"
+
 local function classBody(c: Model.Cls): String =
   "class \(c.qname)(\(if (c.base != null) c.base.cls.qname else "_Closed")):\n"
     + (
@@ -250,22 +288,12 @@ local function classBody(c: Model.Cls): String =
         ""
     )
     + (if (c.props.isEmpty) "    pass\n" else c.props.map((p) -> field(p)).join(""))
+    + conditional(c.qname, c.conditions)
     + "\n\n"
 
 local function classAliasDef(n: Model.Node): String =
   "class \(n.alias)(\(n.cls.qname)):\n"
-    + (
-      if (n.requiredWhen == null)
-        "    pass\n"
-      else
-        "    @model_validator(mode=\"after\")\n"
-          + "    def _conditional(self) -> \"\(n.alias)\":\n"
-          + "        if self.\(pyName(n.requiredWhen.property)) in \(lit(n.requiredWhen.`in`.toList())):\n"
-          + "            missing = [k for k in \(lit(n.requiredWhen.require.toList().map((k) -> pyName(k)))) if getattr(self, k) is None]\n"
-          + "            if missing:\n"
-          + "                raise ValueError(f\"{missing} required when \(n.requiredWhen.property) is \(n.requiredWhen.`in`.join(" or "))\")\n"
-          + "        return self\n"
-    )
+    + (if (n.conditions.isEmpty) "    pass\n" else conditional(n.alias, n.conditions))
     + "\n\n"
 
 local header: String =
@@ -299,6 +327,25 @@ local header: String =
       if isinstance(value, float) and value.is_integer():
           return int(value)
       return value
+
+
+  def _at(value: Any, path: list[str]) -> Any:
+      # The value at a path through blocks; absent on the way is absent.
+      for key in path:
+          if value is None:
+              return None
+          value = getattr(value, key, None)
+      return value
+
+
+  def _deny_keys(keys: list[str]):
+      def check(value: dict[str, Any]) -> dict[str, Any]:
+          found = [k for k in keys if k in value]
+          if found:
+              raise ValueError(f"must not have the key {found}")
+          return value
+
+      return check
 
 
   def _has_keys(keys: list[str]):

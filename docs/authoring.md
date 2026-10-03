@@ -18,9 +18,10 @@ alias there, where it is reviewed once and used by every contract.
 *Checked by:* `hack/lint.sh`, on the source: no `Regex(`, no constrained type
 (`String(length >= 1)`), no `typealias` and no `@A.Pattern` outside the
 vocabulary. Two exceptions, both data a generator can read: a rule across
-fields, an alias annotated `@A.RequiredWhen` (the TLS fragment's "a mode other
-than `off` needs the whole identity"), and a bound on a property, which is the
-next section but one.
+fields, an alias annotated `@A.RequiredWhen` or `@A.RequiredUnless` (the TLS
+fragment's "a mode other than `off` needs the whole identity"; a class or a module
+carries the same annotations with no alias, see "A rule across fields"), and a
+bound on a property, which is the next section but one.
 
 ## A constraint is written twice, and cannot drift
 
@@ -83,6 +84,130 @@ neither writes `output { value = Check.checked(module) }`.
 *Checked by:* the probes, which run the same boundaries (at, just below and just
 above each bound) for a property as for an alias, against Pkl; and the loader in
 the conformance suite.
+
+### Exclusive bounds
+
+`@A.Range` has four ends: `min` and `max` (inclusive) and `exclusiveMin` and
+`exclusiveMax` (not). "More than zero" is `exclusiveMin = 0`, which no inclusive
+bound can say for a number:
+
+```pkl
+/// The share that may fail: more than none, at most all of it.
+@A.Range { exclusiveMin = 0 }
+ratio: V.Ratio = 0.05
+
+/// A half-open interval: zero up to, and not including, one.
+@A.Range { min = 0; exclusiveMax = 1 }
+phase: Number?
+```
+
+The two ends of one side may both be given, and the stricter holds (a property's
+`exclusiveMin = 0` over a type's `min = 0` is "greater than 0"). A range that
+leaves no value is refused when the contract is reflected: a lower end above the
+upper, or the two meeting where either is exclusive (`exclusiveMin = 1; max = 1`).
+Pkl enforces it through `Check`, the JSON Schema says `exclusiveMinimum` and
+`exclusiveMaximum`, zod `.gt()` and `.lt()`, pydantic `Field(gt=..., lt=...)`. The
+probes try an exclusive bound AT it (refused) and one step either side of it: one
+for an integer, a thousandth for a number.
+
+## A map that refuses keys: `@A.DenyKeys`
+
+A `Mapping` or an open object (`V.OpenObject`) whose keys are free except for a few
+the platform owns takes `@A.DenyKeys` on the property:
+
+```pkl
+/// Labels put on every alert. `severity` is the rules' own.
+@A.DenyKeys { keys { "severity"; "k8s_cluster_name" } }
+alertLabels: Mapping<String, V.NonEmptyString> = new Mapping {}
+```
+
+The property is no longer the vocabulary alias it had, so it is written out in full
+in zod and pydantic. JSON Schema says `propertyNames: { not: { enum: [...] } }`
+(joined by `allOf` with the key type's own `propertyNames`, for a map keyed by a
+pattern or an enum), zod a `refine` on the record, pydantic an `AfterValidator`, Pkl
+`Check`. Keys are compared as written: a key is denied by its exact name.
+
+## A rule across fields: `@A.RequiredWhen` and `@A.RequiredUnless`
+
+"When the install only renders rules, nothing else is needed" is a rule across
+fields, and across blocks. It is written once, on the class or the module that
+holds the fields (or on an alias of such a class), as the condition and the paths
+it requires:
+
+```pkl
+@A.RequiredUnless {
+  property = "alerts.remote.enabled"
+  `in` { true }
+  require { "database.host"; "database.owner.passwordSecret"; "events.url" }
+}
+module my.Chart
+```
+
+- `@A.RequiredWhen`: every path of `require` must be present when the value at
+  `property` is one of `in`.
+- `@A.RequiredUnless`: every path must be present unless it is. A document that
+  never says (the block, or the value, is absent) is therefore asked for them.
+- A path is dotted names from the annotated class, through blocks (properties of a
+  class type): `mode`, `alerts.remote.enabled`. `in` holds booleans for a boolean
+  and strings for an enum (an alias or an inline union).
+- "Present" is "not absent": the key is in the document. A class may carry several
+  rules, and a document its own and its bases'.
+
+Every path is resolved against the contract when it is generated, and what cannot
+be is an error, never a rule that quietly never fires: a name that is no property,
+a path through a list, a map or a scalar, a condition that is neither a boolean nor
+an enum, a value of `in` the property cannot hold, an empty `require` or `in`.
+
+**The limits, each one so that Pkl and a schema validator say the same thing.** A
+JSON Schema validator fills no default in, and Pkl always has one, so the rule is
+refused where a default would change its meaning:
+
+- a required path ends at a property with no default (nullable, or set at install);
+- the condition's property does not default to a value of `in`;
+- no block on the way to either has a default of its own (a block Pkl builds from
+  its class's defaults is fine: it has nothing the document lacks);
+- a rule on a class whose own defaults would break it must not be on a block that a
+  document may leave out (a default-complete one): pydantic and Pkl would refuse
+  the document that omits it, which the schema and zod accept. Put the rule on a
+  class that is not default-complete, or on a nullable block.
+
+A condition on a string or a number that is not an enum is not supported; make it
+an enum. A path through a `Listing` or `Mapping` is not supported either.
+
+How each says it. JSON Schema: `allOf` of `if`/`then` (when) or `if`/`else`
+(unless), the `if` a nested `properties` that `required`s every step down to the
+value, so a document that leaves it out does not match, the other side the same
+shape of `required` for each path, with shared steps in one `properties`. zod: one
+`superRefine` that reads a path with `at` and reports each missing path at that
+path. pydantic: a `model_validator(mode="after")` per class, named for it so that a
+subclass adds to its base's. Pkl: `Check` reads the annotations of the value's
+class and of every class it extends (a module's class carries the module's), so
+`pkl eval` of a document or of a chart's `values.pkl` fails with the paths. An
+alias's rule is Pkl's through the alias's own constraint, as it always was.
+
+*Checked by:* the model (every case above is a generation error, `test/LintTest.pkl`),
+`Check` against Pkl, and the conformance contract `conditions` (a module and a
+class, a boolean and an enum, both branches and the absent one, nested required
+paths, fixtures under `fixtures/conditions`).
+
+## The vocabulary's newer types
+
+- `PromDuration`: a Prometheus duration, whole seconds, minutes or hours
+  (`^[0-9]+(s|m|h)$`). `GoDuration` is wrong for a field a Prometheus rule reads: it
+  admits `ns`, `us` and `ms`. There is **no empty variant**: every vocabulary type
+  refuses `""` (a value that may be left out is absent, `PromDuration?`), and a
+  consumer that reads an empty string as "none" must read an absent key the same,
+  which is the rule of set-at-install blocks and of `Quantity?`. A field that
+  meant "empty is none" becomes `PromDuration?` and loses its `""` default.
+- `DnsLabel`: an RFC 1123 label (`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, at most 63
+  characters), the shape of a namespace. Never empty and never dotted (`DnsName` is
+  the dotted one, empty allowed). A namespace or a cluster name that may be left out
+  is `DnsLabel?`, absent rather than `""`. Write the `?` on the property: an alias
+  that is nullable is read as required (the same trap as `X | Y?`).
+- `StatusCodeList`: status code names joined by a bar, `INTERNAL|UNAVAILABLE`
+  (`^[A-Z_]+(\|[A-Z_]+)*$`). It says nothing of which codes exist.
+- `GatewayTlsMode`: `"off" | "permissive"`, a gateway listener's mutual TLS. Not
+  `TlsMode`: a gateway has no `strict`, so the value is not spellable.
 
 ## Set at install
 

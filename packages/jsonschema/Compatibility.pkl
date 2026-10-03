@@ -14,7 +14,8 @@
 ///     `maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`
 ///     raised, lowered or added);
 ///   - an object closed that was open (`additionalProperties` or
-///     `unevaluatedProperties` set to `false`);
+///     `unevaluatedProperties` set to `false`), or a map's keys constrained
+///     where they were free (`propertyNames` added, as `@DenyKeys` does);
 ///   - a pattern tightened: added where there was none, or changed. Whether one
 ///     regular expression is narrower than another is not decidable in general,
 ///     so a changed pattern is reported as breaking and a reviewer overrules it;
@@ -292,7 +293,9 @@ local function keywords(ctx: Ctx, path: String, b: Data, a: Data, seen: List<Str
           List()
       )
       + (
-        if (get(a, "propertyNames") != null && get(b, "propertyNames") != null)
+        if (get(a, "propertyNames") != null && get(b, "propertyNames") == null)
+          List(bad(ctx, path, "the keys were constrained (`propertyNames` was added)"))
+        else if (get(a, "propertyNames") != null)
           compare(ctx, at(path, "<name>"), get(b, "propertyNames"), get(a, "propertyNames"), seen)
         else
           List()

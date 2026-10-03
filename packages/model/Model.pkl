@@ -52,9 +52,23 @@ class Node {
   pattern: Dynamic?
   format: Dynamic?
   requiresKeys: Dynamic?
-  requiredWhen: Dynamic?
+  /// The keys a map or an open object must not carry (`@DenyKeys`, on a property).
+  denyKeys: List<String>?
+  /// The rules across fields written on an ALIAS of a class (`@RequiredWhen`,
+  /// `@RequiredUnless`), each as `condition` describes. The ones written on the
+  /// class or the module itself are `Cls.conditions`.
+  conditions: List<Dynamic> = List()
   chart: Dynamic?
 }
+
+/// A rule across fields, read from `@RequiredWhen` or `@RequiredUnless` and
+/// resolved against the class it is written on, so that a generator can rely on
+/// every path existing. A `Dynamic` with: `unless` (Boolean: `@RequiredUnless`),
+/// `property` (the dotted path that decides), `path` (the same, as a list of
+/// names), `values` (what the property may be: strings for an enum, booleans for
+/// a boolean) and `require` (the dotted paths that must be present), `paths` (the
+/// same, each as a list of names).
+typealias Condition = Dynamic
 
 class Prop {
   name: String
@@ -93,6 +107,10 @@ class Cls {
   isOpen: Boolean = false
   /// The documented class this one extends (allOf), if any.
   base: Node?
+  /// The rules across fields written on this class, or on the module it is, and
+  /// on the classes it inherits that are not documents of their own (a document
+  /// that is a base brings its own, through `base`).
+  conditions: List<Condition> = List()
 }
 
 local const function short(n: String): String = n.split(".").last
@@ -112,15 +130,30 @@ local function named(a: Annotation, name: String): Boolean =
 local function find(a: List<Annotation>, name: String): Dynamic? =
   a.findOrNull((x) -> named(x, name))?.toDynamic()
 
+/// The `@Range` in `a` as data with all four ends, or null. A vocabulary of an
+/// earlier release has no exclusive ends, and the generators must read it too
+/// (the compatibility check generates the last release's schemas with these
+/// generators): a missing end is an absent one.
+local function rangeIn(a: List<Annotation>): Dynamic? =
+  let (r = find(a, "Range"))
+    if (r == null)
+      null
+    else
+      new Dynamic {
+        min = r.min
+        max = r.max
+        exclusiveMin = r.getPropertyOrNull("exclusiveMin")
+        exclusiveMax = r.getPropertyOrNull("exclusiveMax")
+      }
+
 local function annots(a: List<Annotation>): Dynamic = new Dynamic {
   schema = find(a, "Schema")
   def = find(a, "Def")
-  range = find(a, "Range")
+  range = rangeIn(a)
   length = find(a, "Length")
   pattern = find(a, "Pattern")
   format = find(a, "Format")
   requiresKeys = find(a, "RequiresKeys")
-  requiredWhen = find(a, "RequiredWhen")
   chart = find(a, "Chart")
 }
 
@@ -131,12 +164,11 @@ local function withAnnots(n: Node, a: List<Annotation>, adoc: String?, aalias: S
       when (adoc != null && n.doc == null) { doc = adoc }
       when (x.schema != null) { schema = x.schema }
       when (x.def != null) { def = x.def }
-      when (x.range != null) { range = x.range }
+      when (x.range != null) { range = normalRange(aalias ?? "a type", x.range) }
       when (x.length != null) { length = x.length }
       when (x.pattern != null) { pattern = x.pattern }
       when (x.format != null) { format = x.format }
       when (x.requiresKeys != null) { requiresKeys = x.requiresKeys }
-      when (x.requiredWhen != null) { requiredWhen = x.requiredWhen }
       when (x.chart != null) { chart = x.chart }
     }
 
@@ -165,7 +197,11 @@ local function declared(t: reflect.DeclaredType): Node =
       if (nullableMember(r.referent))
         throw(nullableMemberMessage("alias `\(r.name)`"))
       else
-        withAnnots(nodeOf(r.referent), r.annotations, r.docComment, r.name)
+        withAliasConditions(
+          r.name,
+          withAnnots(nodeOf(r.referent), r.annotations, r.docComment, r.name),
+          r.annotations,
+        )
     else if (r.enclosingDeclaration.uri == "pkl:base")
       base(r.name, t)
     else if (r.name == "ModuleClass")
@@ -232,34 +268,57 @@ local function nullableMember(t: reflect.Type): Boolean =
 local function nullableMemberMessage(where: String): String =
   "\(where): a union with a nullable member. `X | Y?` makes only `Y` nullable; write `(X | Y)?`"
 
-/// The narrowest of two ranges (or lengths): a property's own bound can only
-/// tighten what its type already says, because Pkl enforces both.
+local function bigger(a: Number?, b: Number?): Number? =
+  if (a == null) b else if (b == null) a else if (a > b) a else b
+
+local function smaller(a: Number?, b: Number?): Number? =
+  if (a == null) b else if (b == null) a else if (a < b) a else b
+
+/// A range with the redundant side of each end dropped (`min = 0` beside
+/// `exclusiveMin = 0` is the exclusive one), and refused when it leaves no value:
+/// the lower end above the upper, or the two meeting where either is exclusive.
+local function normalRange(where: String, r: Dynamic): Dynamic =
+  let (keepMin = r.min != null && !(r.exclusiveMin != null && r.exclusiveMin >= r.min))
+  let (keepExMin = r.exclusiveMin != null && !(r.min != null && r.min > r.exclusiveMin))
+  let (keepMax = r.max != null && !(r.exclusiveMax != null && r.exclusiveMax <= r.max))
+  let (keepExMax = r.exclusiveMax != null && !(r.max != null && r.max < r.exclusiveMax))
+  let (lo = if (keepMin) r.min else if (keepExMin) r.exclusiveMin else null)
+  let (hi = if (keepMax) r.max else if (keepExMax) r.exclusiveMax else null)
+    if (
+      lo != null
+        && hi != null
+        && (lo > hi || (lo == hi && (keepExMin || keepExMax)))
+    )
+      throw("\(where): the bounds leave no value (the lower end is \(lo), the upper \(hi))")
+    else
+      new Dynamic {
+        min = if (keepMin) r.min else null
+        max = if (keepMax) r.max else null
+        exclusiveMin = if (keepExMin) r.exclusiveMin else null
+        exclusiveMax = if (keepExMax) r.exclusiveMax else null
+      }
+
+/// A property's own `@Range` laid over its type's: the tighter of each end, and
+/// the result must leave a value.
+local function narrowerRange(where: String, a: Dynamic?, b: Dynamic): Dynamic =
+  if (a == null)
+    normalRange(where, b)
+  else
+    normalRange(where, new Dynamic {
+      min = bigger(a.min, b.min)
+      max = smaller(a.max, b.max)
+      exclusiveMin = bigger(a.exclusiveMin, b.exclusiveMin)
+      exclusiveMax = smaller(a.exclusiveMax, b.exclusiveMax)
+    })
+
+/// The narrowest of two lengths: a property's own bound can only tighten what
+/// its type already says, because Pkl enforces both.
 local function narrower(where: String, a: Dynamic?, b: Dynamic): Dynamic =
   if (a == null)
     b
   else
-    let (
-      lo =
-        if (a.min == null)
-          b.min
-        else if (b.min == null)
-          a.min
-        else if (a.min > b.min)
-          a.min
-        else
-          b.min
-    )
-    let (
-      hi =
-        if (a.max == null)
-          b.max
-        else if (b.max == null)
-          a.max
-        else if (a.max < b.max)
-          a.max
-        else
-          b.max
-    )
+    let (lo = bigger(a.min, b.min))
+    let (hi = smaller(a.max, b.max))
       if (lo != null && hi != null && lo > hi)
         throw(
           "\(where): the bound of the property and the one of its type leave no value (from \(lo) to \(hi))"
@@ -267,25 +326,30 @@ local function narrower(where: String, a: Dynamic?, b: Dynamic): Dynamic =
       else
         new Dynamic { min = lo; max = hi }
 
-/// The type of a property, with the `@Range` and `@Length` the property itself
-/// carries laid over the type's own. They narrow a number or a string and
-/// nothing else; the type is then no longer the alias (zod and pydantic would
-/// refer to the alias by name and lose the bound), so it is spelled out.
+/// The type of a property, with the `@Range`, `@Length` and `@DenyKeys` the
+/// property itself carries laid over the type's own. They narrow a number, a
+/// string and a map or open object, and nothing else; the type is then no longer
+/// the alias (zod and pydantic would refer to the alias by name and lose the
+/// bound), so it is spelled out.
 local function narrowed(where: String, n: Node, a: List<Annotation>): Node =
-  let (r = find(a, "Range"))
+  let (r = rangeIn(a))
   let (l = find(a, "Length"))
-    if (r == null && l == null)
+  let (d = find(a, "DenyKeys"))
+    if (r == null && l == null && d == null)
       n
     else if (r != null && n.kind != "integer" && n.kind != "number")
       throw("\(where): @Range is for a number, and this property is \(n.kind)")
     else if (l != null && n.kind != "string")
       throw("\(where): @Length is for a string, and this property is \(n.kind)")
+    else if (d != null && n.kind != "map" && n.kind != "open")
+      throw("\(where): @DenyKeys is for a map or an open object, and this property is \(n.kind)")
     else
       (n) {
         alias = null
         aliasBase = n.alias ?? n.aliasBase
-        when (r != null) { range = narrower(where, n.range, r) }
+        when (r != null) { range = narrowerRange(where, n.range, r) }
         when (l != null) { length = narrower(where, n.length, l) }
+        when (d != null) { denyKeys = (n.denyKeys ?? List()) + d.keys.toList() }
       }
 
 /// What Pkl gives a property of type `t` when nobody sets it: an instance of
@@ -440,10 +504,140 @@ local function inherited(c: reflect.Class): Map<String, reflect.Property> =
     else
       inherited(sup) + sup.properties.toMap()
 
+/// The properties along the dotted path `full` from class `c`, one for each
+/// name, resolved in `c` and in the classes it extends. A name that is no
+/// property, or a path that goes through anything but a block (a property whose
+/// type is a class), is a generation error: a rule that names nothing would
+/// never fire, and a generator that skipped it would hide that.
+local function hops(where: String, c: Cls, segments: List<String>, full: String): List<Prop> =
+  let (p = allProps(c).findOrNull((x) -> x.name == segments.first))
+    if (p == null)
+      throw(
+        "\(where): `\(full)` names no property: `\(c.qname)` has no `\(segments.first)` (it has \(allProps(c).map((x) -> "`\(x.name)`").join(", "))"
+          + ")"
+      )
+    else if (segments.length == 1)
+      List(p)
+    else if (p.type.kind != "object")
+      throw(
+        "\(where): `\(full)` goes through `\(segments.first)`, which is \(typeLabel(p.type)) and not a block: a path runs through blocks only"
+      )
+    else
+      List(p) + hops(where, p.type.cls, segments.drop(1), full)
+
+/// A block on the way to a path may not have a default of its own: Pkl would see
+/// what that default holds, and a schema validator, which does not fill a default
+/// in, would see nothing.
+local function checkWay(where: String, ps: List<Prop>, full: String): Boolean =
+  ps
+    .dropLast(1)
+    .every((p) ->
+      (!p.hasDefault || p.bare)
+        || throw(
+          "\(where): `\(full)` goes through `\(p.name)`, which has a default of its own: Pkl would find in it what a schema validator, which fills no default in, does not"
+        )
+    )
+
+/// One rule across fields, resolved against `c`, or an error saying what is
+/// wrong with it.
+local function condition(where: String, c: Cls, a: Dynamic, isUnless: Boolean): Condition =
+  let (kind = if (isUnless) "@RequiredUnless" else "@RequiredWhen")
+  let (here = "\(where) \(kind)")
+  let (vals = a.`in`.toList())
+  let (segments = a.property.split("."))
+  let (way = hops(here, c, segments, a.property))
+  let (leaf = way.last)
+  let (
+    resolved =
+      a.require
+        .toList()
+        .map((r) ->
+          let (rs = r.split("."))
+          let (rway = hops(here, c, rs, r))
+            if (!checkWay(here, rway, r))
+              throw("unreachable")
+            else if (rway.last.hasDefault)
+              throw(
+                "\(here): `\(r)` has a default, so it is always present to Pkl and never required of a document; a required path is a property with none (nullable, or set at install)"
+              )
+            else
+              rs
+        )
+  )
+    if (a.require.toList().isEmpty)
+      throw("\(here): `require` names nothing")
+    else if (vals.isEmpty)
+      throw("\(here): `in` names no value")
+    else if (!checkWay(here, way, a.property) || resolved.length < 0)
+      throw("unreachable")
+    else if (leaf.type.kind != "boolean" && leaf.type.kind != "enum")
+      throw(
+        "\(here): `\(a.property)` is \(typeLabel(leaf.type)); a condition is on a boolean or an enum"
+      )
+    else if (leaf.type.kind == "boolean" && !vals.every((v) -> v is Boolean))
+      throw("\(here): `\(a.property)` is a boolean, so `in` lists booleans")
+    else if (
+      leaf.type.kind == "enum"
+        && !vals.every((v) -> v is String && leaf.type.values.contains(v))
+    )
+      throw(
+        "\(here): `in` has a value `\(a.property)` cannot hold (it is one of \(leaf.type.values.map((v) -> "`\(v)`").join(", ")))"
+      )
+    else if (leaf.hasDefault && vals.contains(leaf.default))
+      throw(
+        "\(here): `\(a.property)` defaults to \(literal(leaf.default)), a value of `in`: a document that leaves it out means one thing to Pkl and another to a schema validator, which fills no default in"
+      )
+    else
+      new Dynamic {
+        unless = isUnless
+        property = a.property
+        path = segments
+        `values` = vals
+        require = a.require.toList()
+        paths = resolved
+      }
+
+/// The conditions written in annotations `a`, resolved against `c`.
+local function conditionsOf(where: String, c: Cls, a: List<Annotation>): List<Condition> =
+  a
+    .filter((x) -> named(x, "RequiredWhen"))
+    .map((x) -> condition(where, c, x.toDynamic(), false))
+    + a
+      .filter((x) -> named(x, "RequiredUnless"))
+      .map((x) -> condition(where, c, x.toDynamic(), true))
+
+/// The annotations of class `c` and of the classes it inherits that are not
+/// documents of their own (what `inherited` folds into it).
+local function conditionAnnotations(c: reflect.Class): List<Annotation> =
+  c.annotations
+    + (
+      let (sup = c.superclass)
+        if (
+          sup == null
+            || sup.enclosingDeclaration.uri == "pkl:base"
+            || annots(sup.annotations).schema != null
+        )
+          List()
+        else
+          conditionAnnotations(sup)
+    )
+
+/// `n`, an alias's node, with the rules the alias carries. Only an alias of a
+/// class can carry one.
+local function withAliasConditions(name: String, n: Node, a: List<Annotation>): Node =
+  let (annotated = a.any((x) -> named(x, "RequiredWhen") || named(x, "RequiredUnless")))
+    if (!annotated)
+      n
+    else if (n.kind != "object")
+      throw("\(name): a rule across fields is for an alias of a class, and this is \(n.kind)")
+    else
+      (n) { conditions = conditionsOf(name, n.cls, a) }
+
 local function classOf(c: reflect.Class): Cls =
   let (mod = c.enclosingDeclaration)
   let (sup = c.superclass)
-    new Cls {
+  let (
+    k = new Cls {
       qname = qualify(short(mod.name), c.name)
       doc = c.docComment
       props = propsOf(c.name, inherited(c) + c.properties.toMap())
@@ -455,6 +649,8 @@ local function classOf(c: reflect.Class): Cls =
         base = declared(reflect.DeclaredType(sup))
       }
     }
+  )
+    (k) { conditions = conditionsOf(k.qname, k, conditionAnnotations(c)) }
 
 /// The root node of a module that is itself a document.
 function moduleNode(m: Module): Node = fromMirror(reflect.Module(m))
@@ -462,22 +658,25 @@ function moduleNode(m: Module): Node = fromMirror(reflect.Module(m))
 local function fromMirror(mm: reflect.Module): Node =
   let (sup = mm.supermodule)
   let (hasBase = sup != null && sup.annotations.any((a) -> named(a, "Schema")))
+  let (
+    k = new Cls {
+      qname = short(mm.name)
+      doc = mm.docComment
+      // A document that extends another is its own properties and an `allOf`; a
+      // chart is everything it inherits, because it has no base to compose.
+      props =
+        propsOf(
+          short(mm.name),
+          if (hasBase) mm.moduleClass.properties else mm.moduleClass.allProperties,
+        )
+      isOpen = mm.modifiers.contains("open")
+      when (hasBase) { base = fromMirror(sup) }
+    }
+  )
     withAnnots(
       new Node {
         kind = "object"
-        cls = new Cls {
-          qname = short(mm.name)
-          doc = mm.docComment
-          // A document that extends another is its own properties and an `allOf`; a
-          // chart is everything it inherits, because it has no base to compose.
-          props =
-            propsOf(
-              short(mm.name),
-              if (hasBase) mm.moduleClass.properties else mm.moduleClass.allProperties,
-            )
-          isOpen = mm.modifiers.contains("open")
-          when (hasBase) { base = fromMirror(sup) }
-        }
+        cls = (k) { conditions = conditionsOf(short(mm.name), k, mm.annotations) }
       },
       mm.annotations,
       mm.docComment,
@@ -688,21 +887,35 @@ function typeLabel(n: Node): String =
   else
     n.kind
 
+/// A number written in a phrase: whole when it is.
+local function num(x: Number): String = "\(x)"
+
+/// The range `r` in words.
+local function rangePhrase(r: Dynamic): String =
+  if (r.min != null && r.max != null)
+    "from \(num(r.min)) to \(num(r.max))"
+  else
+    List(
+      if (r.min != null) "at least \(num(r.min))" else null,
+      if (r.exclusiveMin != null) "greater than \(num(r.exclusiveMin))" else null,
+      if (r.max != null) "at most \(num(r.max))" else null,
+      if (r.exclusiveMax != null) "less than \(num(r.exclusiveMax))" else null,
+    )
+      .filterNonNull()
+      .join(" and ")
+
+/// A rule across fields in words.
+function conditionPhrase(d: Condition): String =
+  let (vs = d.values.map((v) -> "`\(v)`").join(" or "))
+  let (need = d.require.map((k) -> "`\(k)`").join(", "))
+    if (d.unless)
+      "unless `\(d.property)` is \(vs), \(need) are required"
+    else
+      "when `\(d.property)` is \(vs), \(need) are required"
+
 /// The constraints `n` carries, one phrase each, for documentation.
 function constraintsOf(n: Node): List<String> =
-  (
-    if (n.range == null)
-      List()
-    else
-      List(
-        if (n.range.min != null && n.range.max != null)
-          "from \(n.range.min) to \(n.range.max)"
-        else if (n.range.min != null)
-          "at least \(n.range.min)"
-        else
-          "at most \(n.range.max)",
-      )
-  )
+  (if (n.range == null) List() else List(rangePhrase(n.range)))
     + (
       if (n.length == null)
         List()
@@ -725,10 +938,9 @@ function constraintsOf(n: Node): List<String> =
         List("has the keys \(n.requiresKeys.keys.toList().map((k) -> "`\(k)`").join(", "))")
     )
     + (
-      if (n.requiredWhen == null)
+      if (n.denyKeys == null)
         List()
       else
-        List(
-          "when `\(n.requiredWhen.property)` is \(n.requiredWhen.`in`.toList().map((v) -> "`\(v)`").join(" or ")), \(n.requiredWhen.require.toList().map((k) -> "`\(k)`").join(", ")) are required",
-        )
+        List("never has the keys \(n.denyKeys.map((k) -> "`\(k)`").join(", "))")
     )
+    + n.conditions.map((d) -> conditionPhrase(d))
