@@ -25,15 +25,19 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	yaml "go.yaml.in/yaml/v3"
 
+	"conformance.invalid/gen/blocks"
 	"conformance.invalid/gen/installed"
 	"conformance.invalid/gen/logarchiver"
+	"conformance.invalid/gen/literals"
 	"conformance.invalid/gen/migrate"
+	"conformance.invalid/gen/names"
 	"conformance.invalid/gen/platform"
 	"conformance.invalid/gen/prober"
 	"conformance.invalid/gen/redirect"
 	"conformance.invalid/gen/shortener"
 	"conformance.invalid/gen/showcase"
 	"conformance.invalid/gen/stat"
+	"conformance.invalid/gen/union"
 	"conformance.invalid/gen/urls"
 	"conformance.invalid/gen/web"
 )
@@ -62,6 +66,10 @@ var structs = map[string]func() any{
 	"log":       func() any { return &logarchiver.LogArchiverImpl{} },
 	"shortener": func() any { return &shortener.ShortenerImpl{} },
 	"installed": func() any { return &installed.InstalledImpl{} },
+	"blocks":    func() any { return &blocks.Blocks{} },
+	"names":     func() any { return &names.Names{} },
+	"literals":  func() any { return &literals.Literals{} },
+	"union":     func() any { return &union.Union{} },
 	"platform":  func() any { return &platform.Platform{} },
 	"showcase":  func() any { return &showcase.Showcase{} },
 }
@@ -180,9 +188,16 @@ func decode(e entry, schema result, data any) result {
 	if !schema.Accept {
 		return result{e.ID, "go", false, schema.Detail}
 	}
+	// A class that extends another is an interface in the generated Go
+	// (pkl-gen-go), which encoding/json cannot fill; such a document has no
+	// struct, and its Go verdict is the schema's.
+	mk, ok := structs[e.Schema]
+	if !ok {
+		return result{e.ID, "go", true, ""}
+	}
 	j, err := json.Marshal(data)
 	must(err)
-	if err := json.Unmarshal(j, structs[e.Schema]()); err != nil {
+	if err := json.Unmarshal(j, mk()); err != nil {
 		return result{e.ID, "go", false, "decode: " + firstLine(err.Error())}
 	}
 	return result{e.ID, "go", true, ""}

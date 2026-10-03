@@ -9,6 +9,8 @@ tests {
   "LintTest.pkl"
   "ContractsTest.pkl"
   "CompatTest.pkl"
+  "ModelTest.pkl"
+  "GeneratorsTest.pkl"
 }
 
 dependencies {

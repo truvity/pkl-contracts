@@ -69,6 +69,7 @@ def generate():
     shutil.rmtree(WORK, ignore_errors=True)
     shutil.rmtree(ZOD_DIR, ignore_errors=True)
     modules = sorted(str(p) for p in (CONF / "contract").glob("*.pkl"))
+    modules += sorted(str(p) for p in (CONF / "union").glob("*.pkl"))
     modules += [str(SUITE / "Showcase.pkl")] + sorted(str(p) for p in (CONF / "charts").glob("*Chart.pkl"))
     pkl_run("generate json schema", "@jsonschema/Generate.pkl", "--dir", GEN, *modules)
     pkl_run("generate zod", "@typescript/Generate.pkl", "--dir", ZOD_DIR, *modules)
@@ -149,8 +150,8 @@ def report(entries, results, kotlin):
     for e in entries:
         v = by.get(e["id"], {})
         mark = {c: ("A" if v[c]["accept"] else "R") for c in cols if c in v}
-        # A chart's values have no type to decode into, and the generator refuses `platform`'s unions for Kotlin.
-        missing = [c for c in cols if c not in v and (e["typed"] or c in SCHEMA_ONLY) and not (c == "kotlin" and e["schema"] == "platform")]
+        # A chart's values have no type to decode into, and the generator refuses `platform`'s and `union`'s unions for Kotlin.
+        missing = [c for c in cols if c not in v and (e["typed"] or c in SCHEMA_ONLY) and not (c == "kotlin" and e["schema"] in ("platform", "union"))]
         verdicts = set(mark.values())
         agree = len(verdicts) == 1 and not missing
         if not agree:

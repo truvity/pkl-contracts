@@ -1,0 +1,12 @@
+service-lib: lib
+global: 1
+class: 2
+from: here
+_hidden: h
+2fa: 3
+max-block:
+  max-size: 20
+  class-name: c
+gate:
+  the-mode: secure
+  the-key: k

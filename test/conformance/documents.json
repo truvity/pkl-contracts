@@ -7,6 +7,11 @@
   "migrate": {"schema": "migrate.json", "module": "conformance/contract/Migrate.pkl"},
   "log": {"schema": "log.json", "module": "conformance/contract/LogArchiver.pkl"},
   "installed": {"schema": "installed.json", "module": "conformance/contract/Installed.pkl"},
+  "blocks": {"schema": "blocks.json", "module": "conformance/contract/Blocks.pkl"},
+  "inherit": {"schema": "inherit.json", "module": "conformance/contract/Inherit.pkl"},
+  "names": {"schema": "names.json", "module": "conformance/contract/Names.pkl"},
+  "literals": {"schema": "literals.json", "module": "conformance/contract/Literals.pkl"},
+  "union": {"schema": "union.json", "module": "conformance/union/Union.pkl"},
   "shortener": {"schema": "shortener.json", "module": "conformance/contract/Shortener.pkl"},
   "platform": {"schema": "fragments/platform.json", "module": "conformance/PlatformRef.pkl"},
   "showcase": {"schema": "showcase.json", "module": "Showcase.pkl"}

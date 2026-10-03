@@ -47,6 +47,20 @@ facts {
       #"{"type":"object","properties":{"a":{"type":"string"}}}"#,
     )
   }
+  ["an object that stops being required and gains its default is a widening"] {
+    // What a block whose class gives every field a default turns into: a document that
+    // carried it is as valid as before, and one that leaves it out is valid now.
+    compatible(
+      #"{"type":"object","required":["block"],"properties":{"block":{"type":"object","properties":{"a":{"type":"integer","default":1}}}}}"#,
+      #"{"type":"object","properties":{"block":{"type":"object","properties":{"a":{"type":"integer","default":1}},"default":{"a":1}}}}"#,
+    )
+  }
+  ["an annotation that marks a property is not a change of what is valid"] {
+    compatible(
+      #"{"type":"object","required":["a"],"properties":{"a":{"type":"string"}}}"#,
+      #"{"type":"object","required":["a"],"properties":{"a":{"type":"string","x-set-at-install":true}}}"#,
+    )
+  }
   ["a narrowed type is breaking, a widened one is not"] {
     breaking(#"{"type":"number"}"#, #"{"type":"integer"}"#).length == 1
     breaking(#"{"type":"string"}"#, #"{"type":"integer"}"#).length == 1

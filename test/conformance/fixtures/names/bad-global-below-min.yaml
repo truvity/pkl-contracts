@@ -1,0 +1,3 @@
+service-lib: lib
+global: 0
+gate: {}

@@ -1,0 +1,57 @@
+/// Properties whose names are not plain identifiers: a key with a hyphen (Helm's
+/// own `service-lib` is one), a Python keyword, a leading underscore, a leading
+/// digit. Each is the document's key in every artifact, and a generated
+/// language declares it under a name it can, with the key kept.
+@A.Schema { id = "https://example.com/schemas/names.json"; title = "names" }
+module conformance.contract.Names
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// Required, a key with a hyphen.
+`service-lib`: V.NonEmptyString
+
+/// A Python keyword, optional.
+`global`: V.PositiveInt?
+
+/// A Python keyword, with a default.
+`class`: V.PositiveInt = 1
+
+/// A Python keyword.
+`from`: V.NonEmptyString?
+
+/// A leading underscore.
+`_hidden`: V.NonEmptyString?
+
+/// A leading digit.
+`2fa`: V.PositiveInt?
+
+/// Default-complete, with a hyphen in a key of its own.
+`max-block`: Block
+
+/// A block that is required when its mode says so, through names that are not identifiers.
+gate: Gate
+
+/// Default-complete, with a hyphen in a key of its own.
+class Block {
+  /// A default.
+  `max-size`: V.PositiveInt = 10
+  /// Absent means none.
+  `class-name`: V.NonEmptyString?
+}
+
+/// The fields of a gate.
+class GateFields {
+  /// Whether the key is needed.
+  `the-mode`: "plain" | "secure" = "plain"
+  /// Needed when `the-mode` is `secure`.
+  `the-key`: V.NonEmptyString?
+}
+
+/// A gate: a `secure` mode needs its key.
+@A.RequiredWhen {
+  property = "the-mode"
+  `in` { "secure" }
+  require { "the-key" }
+}
+typealias Gate = GateFields(`the-mode` != "secure" || `the-key` != null)

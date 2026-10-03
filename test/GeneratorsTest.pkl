@@ -1,0 +1,99 @@
+/// What each generator writes for the awkward cases, as text. The conformance
+/// suite proves that the artifacts say the same thing; these are the few that
+/// only a reader of the output can see: that a default with a line break is one
+/// source line, a key with a hyphen is quoted and aliased, a table row is one row.
+amends "pkl:test"
+
+import "@docs/Docs.pkl"
+import "@helm/Helm.pkl"
+import "@jsonschema/JsonSchema.pkl"
+import "@model/Model.pkl"
+import "@python/Pydantic.pkl"
+import "@typescript/Zod.pkl"
+
+import "conformance/contract/Blocks.pkl"
+import "conformance/contract/Literals.pkl"
+import "conformance/contract/Names.pkl"
+import "conformance/union/Union.pkl"
+
+local docs = Model.documents(List(Blocks, Literals, Names, Union))
+local zod = Zod.render(docs)
+local py = Pydantic.render(docs)
+local reference = Docs.render(docs)
+local literals = Model.moduleNode(Literals)
+local function schema(key: String): Dynamic = JsonSchema.document(docs[key])
+
+facts {
+  ["a default with a line break, a tab, a quote or a separator is one escaped source line"] {
+    zod.contains(#"multiline: z.string().default("first\nsecond")"#)
+    zod.contains(#"spaced: z.string().default("a\tb\rc\u000cd")"#)
+    zod.contains(#"quoted: z.string().default("say \"hi\" \\ bye")"#)
+    zod.contains("separated: z.string().default(\"x\\u2028y\\u2029z\")")
+    py.contains(#"multiline: str = Field(default="first\nsecond")"#)
+    py.contains(#"spaced: str = Field(default="a\tb\rc\u000cd")"#)
+    py.contains("separated: str = Field(default=\"x\\u2028y\\u2029z\")")
+    // No default's own line break reached the source.
+    !zod.contains("first\nsecond")
+    !py.contains("first\nsecond")
+  }
+  ["a class documentation that ends in a quote does not close its docstring early"] {
+    py.contains("\"\"\"Ends in a quote: it is called \"the end\\\"\"\"\"")
+  }
+  ["a key that is not an identifier is quoted in zod and aliased in pydantic"] {
+    zod.contains(#"  "service-lib": NonEmptyString,"#)
+    zod.contains(#"  "max-size": PositiveInt.default(10),"#)
+    zod.contains(#"  global: PositiveInt.optional(),"#)
+    zod.contains(#"o["the-mode"]"#)
+    py.contains(#"service_lib: NonEmptyString = Field(alias="service-lib")"#)
+    py.contains(#"global_: PositiveInt | None = Field(default=None, alias="global")"#)
+    py.contains(#"class_: PositiveInt = Field(default=1, alias="class")"#)
+    py.contains(#"f_hidden: NonEmptyString | None = Field(default=None, alias="_hidden")"#)
+    py.contains(#"f_2fa: PositiveInt | None = Field(default=None, alias="2fa")"#)
+    py.contains(#"max_size: PositiveInt = Field(default=10, alias="max-size")"#)
+    py.contains(#"self.the_mode in"#)
+  }
+  ["a map keyed by an enum is a partial record in zod, and its keys are named in the schema"] {
+    zod.contains("z.partialRecord(LogLevel, PositiveInt)")
+    schema("literals").properties["levels"].propertyNames.`enum`
+      == List("debug", "info", "warn", "error")
+  }
+  ["a union with a list in it keeps the items, the keys and the bound of each member"] {
+    schema("union").properties["names"].anyOf.length == 2
+    schema("union").properties["names"].anyOf.first.type == "array"
+    schema("union").properties["names"].anyOf.first.items.minLength == 1
+    schema("union").properties["sizes"].anyOf.first.items.type == "integer"
+    schema("union").properties["labels"].anyOf.first.additionalProperties.type == "string"
+  }
+  ["a rule across the fields of a class that is not a document of its own is in its schema"] {
+    schema("names").properties["gate"].allOf.length == 1
+    schema("names").properties["gate"].allOf.first.then.required == List("the-key")
+  }
+  ["a value set at install is marked in the schema, wherever it is"] {
+    schema("blocks").properties["vault"].properties["token"]["x-set-at-install"] == true
+    schema("blocks").properties["vault"].required == List("token")
+    !schema("blocks").properties["vault"].properties["token"].toMap().containsKey("default")
+    !schema("blocks").properties["upstream"].properties["host"]
+      .toMap()
+      .containsKey("x-set-at-install")
+  }
+  ["a block that is default-complete is optional in the schema and carries its default whole"] {
+    !schema("blocks").required.contains("client")
+    schema("blocks").properties["client"]["default"]["retry"]["attempts"] == 3
+    List("upstream", "vault", "wrapped", "deep", "volume")
+      .every((k) -> schema("blocks").required.contains(k))
+  }
+  ["a value set at install has a structured marker in the reference"] {
+    reference.contains("| `token` | NonEmptyString | yes |  |")
+    reference.contains(
+      "| Field | Type | Required | Default | Constraints | Description | Set at install |",
+    )
+    reference.contains("**Set at install.** The token. Every install supplies its own. | yes |")
+  }
+  ["a default with a bar, a backtick or a line break is one cell of one row"] {
+    reference.split("\n").filter((l) -> l.startsWith("| `multiline`")).length == 1
+    reference.contains(#"`"first\nsecond"`"#)
+    reference.contains(#"`"left\|right `code`"`"#)
+    Helm.readme(literals).contains(#"`"left\|right `code`"`"#)
+    Helm.readme(literals).split("\n").filter((l) -> l.startsWith("| `multiline`")).length == 1
+  }
+}

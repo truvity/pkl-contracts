@@ -30,9 +30,14 @@ rm -rf gen
   --mapping conformance.contract.LogArchiver=$pkg/logarchiver \
   --mapping conformance.contract.Shortener=$pkg/shortener \
   --mapping conformance.contract.Installed=$pkg/installed \
+  --mapping conformance.contract.Blocks=$pkg/blocks \
+  --mapping conformance.contract.Inherit=$pkg/inherit \
+  --mapping conformance.contract.Names=$pkg/names \
+  --mapping conformance.contract.Literals=$pkg/literals \
+  --mapping conformance.union.Union=$pkg/union \
   "$base/contracts.vocab@$version#/Vocab.pkl" \
   "$base/contracts.fragments@$version#/Fragments.pkl" \
   "$base/contracts.fragments@$version#/Platform.pkl" \
   "$base/contracts.templates@$version#/ServiceConfig.pkl" \
   ../../Showcase.pkl \
-  "$c"/*.pkl
+  "$c"/*.pkl ../union/*.pkl

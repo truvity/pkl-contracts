@@ -17,6 +17,10 @@
 ///
 /// `Dynamic.toTyped` is shallow, so the nested conversion is done here by
 /// reflecting on the property types.
+///
+/// A third place where Pkl is stricter than the others: Pkl's `Float` refuses `2`,
+/// while JSON Schema's `number`, zod and pydantic accept it, as does any JSON
+/// reader. The loader widens it, so that the oracle says what a document means.
 module contracts.test.Load
 
 import "pkl:reflect"
@@ -28,10 +32,36 @@ local function conv(v: Any, t: reflect.Type): Any =
     null
   else if (t is reflect.NullableType)
     conv(v, t.member)
+  else if (t is reflect.UnionType)
+    // A union is read as the member whose shape the value has: a list as a
+    // Listing, an object as a Mapping or a class (Pkl's own check follows).
+    let (m = t.members.findOrNull((m) -> shaped(v, m)))
+      if (m == null) v else conv(v, m)
   else if (t is reflect.DeclaredType)
     declared(v, t)
   else
     v
+
+/// Whether a parsed value has the shape of type `t`: only the two composite
+/// shapes a document has, a list and an object.
+local function shaped(v: Any, t: reflect.Type): Boolean =
+  if (t is reflect.NullableType)
+    shaped(v, t.member)
+  else if (t is reflect.DeclaredType)
+    let (r = t.referent)
+      if (r is reflect.TypeAlias)
+        shaped(v, r.referent)
+      else if (r.enclosingDeclaration.uri == "pkl:base")
+        if (v is Listing)
+          r.name == "Listing"
+        else if (v is Dynamic)
+          r.name == "Mapping" || r.name == "Dynamic"
+        else
+          false
+      else
+        v is Dynamic
+  else
+    false
 
 local function declared(v: Any, t: reflect.DeclaredType): Any =
   let (r = t.referent)
@@ -40,6 +70,10 @@ local function declared(v: Any, t: reflect.DeclaredType): Any =
     else if (r.enclosingDeclaration.uri == "pkl:base")
       if (r.name == "Int" && v is Float && !v.isNaN && !v.isInfinite && v == v.truncate())
         v.toInt()
+      else if (r.name == "Float" && v is Int)
+        // JSON has one kind of number: 2 is as good a float as 2.0 (Pkl's `Float`
+        // refuses an `Int`).
+        v.toFloat()
       else if (r.name == "Listing" && v is Listing)
         new Listing { for (e in v) { conv(e, t.typeArguments[0]) } }
       else if (r.name == "Mapping" && v is Dynamic)

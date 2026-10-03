@@ -1,0 +1,9 @@
+multiline: "a\nb"
+choice: "a\"b"
+levels:
+  debug: 1
+  warn: 2
+weight: 2.5
+ratio: 0.5
+quoteDoc:
+  size: 3

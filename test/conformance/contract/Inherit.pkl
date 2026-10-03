@@ -1,0 +1,47 @@
+/// Classes that extend a class the contract does not publish as a document of its
+/// own: what they inherit is theirs, in every artifact, and what an inherited
+/// field lacks (a default) makes the block required.
+@A.Schema { id = "https://example.com/schemas/inherit.json"; title = "inherit" }
+module conformance.contract.Inherit
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// Default-complete: a field of its own and one of its base's.
+derived: Derived
+
+/// Default-complete through two levels of base.
+chain: Chain
+
+/// Not default-complete: the base has a field with no default.
+needs: Needs
+
+/// What `Derived` extends.
+open class Base {
+  /// Set by the base.
+  fromBase: V.PositiveInt = 1
+}
+
+/// A class that extends one the contract does not publish as a document.
+open class Derived extends Base {
+  /// Set by the class itself.
+  own: V.PositiveInt = 2
+}
+
+/// A class two levels below `Base`.
+class Chain extends Derived {
+  /// Set by the last class.
+  last: V.PositiveInt = 3
+}
+
+/// A base with a field every block names.
+open class Named {
+  /// Every block of a class below names itself.
+  name: V.NonEmptyString
+}
+
+/// Its base's `name` has no default.
+class Needs extends Named {
+  /// Set by the class itself.
+  size: V.PositiveInt = 1
+}
