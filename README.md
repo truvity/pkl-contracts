@@ -46,7 +46,9 @@ Three nouns.
   thing wherever they appear. There are no ad-hoc constraints anywhere else: a
   field that needs a rule the vocabulary lacks adds it there. Each type states
   its constraint twice, as the expression Pkl enforces and as an annotation a
-  generator reads, from the same constants; probes keep the two honest.
+  generator reads, from the same constants; probes keep the two honest. A field
+  whose rule is only a bound (a minimum, a length, a port that may be zero) says
+  so with `@A.Range` or `@A.Length` on the property, laid over the type it has.
 - **A fragment** is a shape two services spell the same way: how a listener, a
   log level, a database, a broker or an object store is described. Each is one
   JSON Schema document, with the `$id` of the hand-written schema it was written
@@ -56,9 +58,9 @@ Three nouns.
   `ChartValues` is a service chart's values (`platform`, `config`, `images`).
 
 Four rules decide the places where Pkl, JSON Schema and each language's
-validators disagree: a pattern is a search and refuses a newline, a field with a
-default is optional, `null` is never a value for an optional field, and an
-integral float is an integer. [docs/authoring.md](docs/authoring.md) has them
+validators disagree: a pattern is a search and refuses every line break, a field
+with a default is optional, `null` is never a value for an optional field, and
+an integral float is an integer. [docs/authoring.md](docs/authoring.md) has them
 with their reasons.
 
 ## Install and a worked example
@@ -192,10 +194,11 @@ next release, so until then they are run from this checkout.
 Generated, and agreed on: the conformance suite (`just conformance`) asks nine
 validators about every fixture and probe (four JSON Schema engines, zod,
 pydantic, Go and Kotlin decoded through the official generators' types plus the
-schema, and Pkl itself), and they must all agree. One known gap is reported
-there and not failed: the engines differ on characters other than `\n` that
-a pattern's `.`, `\s` and `$` treat as line breaks or white space
-([docs/authoring.md](docs/authoring.md#what-the-engines-still-disagree-on)).
+schema, and Pkl itself), and they must all agree. There is no tier of known
+disagreements: the engines differed on the characters a pattern's `.`, `\s` and
+`$` treat as line breaks or white space, and the vocabulary now refuses every
+line break and spells white space out, so a split fails the run
+([docs/authoring.md](docs/authoring.md#line-breaks-and-white-space)).
 
 What is not here: the fragments `LambdaArgs`, `SystemdUnit` and `Secrets` and
 the templates `LambdaValues` and `UnitValues`, which wait for a source shape; a

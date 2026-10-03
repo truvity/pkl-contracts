@@ -16,10 +16,11 @@ such as `LogLevel`). A field that needs a rule the vocabulary lacks adds the
 alias there, where it is reviewed once and used by every contract.
 
 *Checked by:* `hack/lint.sh`, on the source: no `Regex(`, no constrained type
-(`String(length >= 1)`) and no `typealias` outside the vocabulary. The one
-exception is a rule across fields, an alias annotated `@A.RequiredWhen` (the
-TLS fragment's "a mode other than `off` needs the whole identity"), because a
-generator can read that annotation.
+(`String(length >= 1)`), no `typealias` and no `@A.Pattern` outside the
+vocabulary. Two exceptions, both data a generator can read: a rule across
+fields, an alias annotated `@A.RequiredWhen` (the TLS fragment's "a mode other
+than `off` needs the whole identity"), and a bound on a property, which is the
+next section but one.
 
 ## A constraint is written twice, and cannot drift
 
@@ -40,23 +41,145 @@ A new alias therefore needs three things: the alias with its annotation, a
 property of that type in `test/Showcase.pkl` (the test refuses an alias with
 none), and, for a pattern, valid and invalid examples in its `@A.Pattern`.
 
+## A bound on a property: `@A.Range` and `@A.Length`
+
+A field whose only rule is a bound (a minimum of 600, a length of at least 16, a
+port that may be zero) is not worth an alias. It takes the vocabulary type it
+would have anyway and a **property annotation**:
+
+```pkl
+/// How long a signed link lives, in seconds.
+@A.Range { min = 600 }
+linkSeconds: V.PositiveInt = 3600
+
+/// A generated password.
+@A.Length { min = 16 }
+password: V.NonEmptyString?
+
+/// A port; zero asks for any free one.
+@A.Range { max = 65535 }
+port: V.NonNegativeInt?
+```
+
+The set is fixed (`@A.Range` for a number, `@A.Length` for a string; a
+`@A.Pattern` stays the vocabulary's) and the generators read them exactly as
+they read an alias's. The bound is laid over the type's own and **intersected**
+with it, because Pkl enforces both: a property can tighten what its type says,
+never loosen it, and a bound that leaves no value is refused when the contract is
+reflected. The type is then written out in full in zod and pydantic (a reference
+to the alias would lose the bound).
+
+*How Pkl enforces it.* Pkl has nowhere to put the rule: a constraint belongs to a
+type, and a type cannot read the annotation of the property it types; a class
+cannot carry an invariant. So `contracts.vocab.Check` does it by reflection: it
+walks a value, reads the annotations on the properties of every object in it, and
+compares each property's value with them, failing with the path and the bound.
+`ServiceConfig` and `ChartValues` call it in their `output`, so `pkl eval` or
+`pkl eval -f yaml` of a document, or of a chart's `values.pkl`, fails on a value
+outside its bound; the Helm generator renders that same output; the test loader
+(the conformance oracle) calls it on every document. A module that extends
+neither writes `output { value = Check.checked(module) }`.
+
+*Checked by:* the probes, which run the same boundaries (at, just below and just
+above each bound) for a property as for an alias, against Pkl; and the loader in
+the conformance suite.
+
+## Set at install
+
+A value that only an install can give (a bucket name, a database host, the
+Secret that holds a password) is **required** by the schema, and **absent** from
+the chart's defaults. A default of `""` would be a lie to a non-empty type and
+would let an install that forgot it fail somewhere else, later. The contract says
+it with an annotation on a property that is a non-empty string and nullable in
+Pkl:
+
+```pkl
+/// The bucket. Every install names its own.
+@A.SetAtInstall
+bucket: V.NonEmptyString?
+```
+
+Nullable, so that the module that holds the defaults need not set it (and the
+rendered `values.yaml` leaves it out); `@A.SetAtInstall`, so that every generator
+reads it as required: it is in the JSON Schema's `required` (and the chart's
+values schema), the zod and pydantic field is not optional, the reference and the
+values table say "Set at install". The test loader refuses a document without it.
+It is never combined with a default, and on a string it needs a type that refuses
+`""`, so that the requirement is of a real value.
+
+*Checked by:* the model, when it reflects the contract (an annotation on a type
+that is not nullable, on a string that may be empty, or beside a default is an
+error); `hack/defaults-check.py`, which reads the generated schemas, values,
+zod, pydantic and reference and fails on a set-at-install property that is
+optional, defaulted or present in `values.yaml`; and the conformance fixtures.
+
+## A default may be an object
+
+A default is any value, an object included: an open object (`V.OpenObject`) with
+Kubernetes' resource requests in it, or a class given a default of its own. The
+JSON Schema `default`, `values.yaml`, zod, pydantic and the reference carry it
+whole. Reflection cannot tell an explicit default from the one Pkl gives every
+object, so the model compares them: a default that differs from what the class
+declares for itself is explicit, and its property is optional. A default that is
+exactly the class's own is none, and such a property stays required, because its
+fields carry their own defaults.
+
+*Checked by:* `hack/defaults-check.py`, on the worked example.
+
+## One literal union, one place
+
+An inline union of literals (`"http/protobuf" | "grpc"`) is fine where it is used
+in ONE place. When the same union, or one that overlaps it, is used in two places,
+it is one concept written twice, and it becomes an enum in the vocabulary
+(`OtelProtocol`, `LogLevel`), where it has one name and one list of members. Check
+which members every consumer accepts before choosing the list: the vocabulary's
+is the union of what they pass through.
+
+*Checked by:* the model, which refuses to generate for modules that have two
+such places (the message names both); and `test/LintTest.pkl` over this
+repository's modules.
+
+## A nullable union is parenthesised
+
+`X | Y?` is `X | (Y?)`: the `?` binds to the last member alone. Reflection sees a
+union with a nullable member, not a nullable union, and a field written that way
+is **required** in every generated artifact while Pkl accepts `null` for it.
+Write `(X | Y)?`.
+
+*Checked by:* `hack/lint.sh` on the source, and the model, which refuses the
+property or alias when it reflects it.
+
 ## The semantic rules
 
 Pkl, JSON Schema and each language's validators disagree at the edges, and the
 contract picks one meaning:
 
-- **A pattern is a search, and refuses a newline.** A JSON Schema `pattern`
-  matches anywhere; Pkl's `String.matches` is a full match, so an alias written
-  with it accepts less than its schema says. The vocabulary writes every pattern
-  through one helper, `search`, which has search semantics. Regular-expression
-  engines also disagree on whether `$` matches before a final `\n`, so no
-  pattern may rely on either answer: `search` refuses any value that contains a
-  newline, and the probes check that each valid example, with a newline added
-  before or after it, is refused. A generator must say the same in its output:
-  JSON Schema pairs each `pattern` with `not: { pattern: "\\n" }`, zod with a
+- **A pattern is a search, and refuses every line break.** A JSON Schema
+  `pattern` matches anywhere; Pkl's `String.matches` is a full match, so an alias
+  written with it accepts less than its schema says. The vocabulary writes every
+  pattern through one helper, `search`, which has search semantics. Regular-
+  expression engines also disagree on which characters `$` matches before and
+  `.` stops at, so no pattern may rely on either answer: `search` refuses any
+  value that contains LF, CR, FF, VT, NEL (U+0085), LS (U+2028) or PS (U+2029),
+  and the probes check that each valid example, with each of them added after it
+  (and the first with each before it), is refused. A generator must say the same
+  in its output, with the guard its target spells: JSON Schema pairs each
+  `pattern` with `not: { pattern: "[...]" }` over the seven, zod with a
   refinement, pydantic with a validator.
   *Checked by:* `hack/lint.sh` (no `matches`, one `Regex(`, the alias and its
-  annotation name the same constant) and the probes.
+  annotation name the same constant) and the probes; `test/LintTest.pkl` checks
+  that the vocabulary's list and the generators' are the same.
+- **A pattern spells no `.`, `\s`, `\d`, `\w` or `\b`.** The engines read them
+  differently (Unicode-aware in ECMAScript and Python, ASCII in Java and RE2;
+  `\v` means two things). A pattern uses an explicit class: `[0-9]`, `[^\n]` for
+  "any character" (a line feed is the one escape they all read alike, and no
+  other line break reaches a pattern), and the vocabulary's white-space class
+  (space, tab, no-break space and the Unicode space separators: ECMAScript's `\s`
+  without the line breaks, so the widest and strictest reading). Characters above
+  U+00FF are written in the pattern itself, because no escape for them is common
+  to RE2 and the rest.
+  *Checked by:* `test/LintTest.pkl`, which scans every `@A.Pattern`, and the
+  probes.
 - **A field with a default is optional.** Pkl cannot say both "required" and
   "has a default", and a default on a required field documented nothing.
 - **`null` is not a value for an optional field.** An optional field is absent,
@@ -105,7 +228,10 @@ what it needs; a listener is not in the envelope, because a job that exits has
 none. `ChartValues` is the values of a service chart: `platform`, `config` and
 the image map. A chart's own contract extends it and narrows `config` to its
 service's contract and `images` to the components it has. The worked example in
-`examples/service` does both, and is rendered by `just example`.
+`examples/service` does both, and is rendered by `just example`. The `service-lib`
+key (Helm puts one in the values it validates for every sub-chart) is
+`Fragments.ServiceLib`: a product chart that does not extend `ChartValues` uses
+it from there.
 
 ## Not here yet
 
@@ -203,17 +329,15 @@ refused). The suite's toolchain (Go, Node, uv, a JDK, Gradle) is its own devbox,
 the recipes enter it through `hack/conf.sh`. The Kotlin half is `just conformance-kotlin`, a recipe of its own because
 Gradle makes it the slow part.
 
-### What the engines still disagree on
+### Line breaks and white space
 
-The rules above settle `\n`. The engines also disagree on the other characters
-a pattern's `.`, `\s` and `$` treat as a line break or as white space: Java (so
-Pkl) lets `$` match before a final `\r`, `\u0085`, `\u2028` or `\u2029`, and
-`.` does not match them; ECMAScript's `.` does not match `\r`, `\u2028` or
-`\u2029`; Python's and RE2's `.` match all but `\n`; `\s` is Unicode-aware in
-ECMAScript and Python (a no-break space is white space) and ASCII in Java and
-RE2, which also differ over `\v`. `test/conformance/edge` holds six such
-strings, and the suite reports, without failing on them, that the engines
-split. They are findings, not accepted behaviour: closing them takes a
-vocabulary decision (refuse every line-break character as `search` refuses
-`\n`, and spell `\s` and `.` as explicit classes), which is a change to the
-published vocabulary and is not made here.
+Engines used to disagree beyond `\n`: Java (so Pkl) let `$` match before a final
+`\r`, NEL, LS or PS, and `.` did not match them; ECMAScript's `.` did not match
+`\r`, LS or PS; `\s` was Unicode-aware in ECMAScript and Python (a no-break space
+is white space) and ASCII in Java and RE2, which also differ over `\v`. The
+suite reported six such strings and did not fail on them. They are closed, not
+accepted: the vocabulary refuses every line break and spells white space and
+"any character" as explicit classes (the two rules above), and the six strings
+are now ordinary fixtures (`fixtures/showcase`) that every engine must refuse.
+There is no informational tier; a new split fails the run, and is closed the same
+way.
