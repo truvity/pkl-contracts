@@ -8,10 +8,14 @@
 /// Semantics every generator of this repository must give, and how this one
 /// gives them (decision 0010 of the policy repository):
 ///
-///   - a pattern is a search (`pattern` is one already) and never admits a
-///     newline: engines disagree on whether `$` matches before a final `\n`,
-///     so each pattern is paired with `not: { pattern: "\n" }`, which means the
-///     same in ECMAScript, RE2, Python and Java;
+///   - a pattern is a search (`pattern` is one already) and never admits a line
+///     break: engines disagree on which characters `$` matches before and `.`
+///     stops at (`\n`, `\r`, U+000B, U+000C, U+0085, U+2028, U+2029), so each
+///     pattern is paired with `not: { pattern: "[...]" }` over all of them, a
+///     class that means the same in ECMAScript, RE2, Python and Java;
+///   - a default is any value, an object included: a property's `default` is the
+///     JSON of the default the contract gives it;
+///   - a property that is set at install is in `required` and has no default;
 ///   - an integral float is an integer: `type: integer` says so;
 ///   - a field with a default is optional: it is not in `required`;
 ///   - `null` is not a value for an optional field: a property's type does not
@@ -28,9 +32,9 @@ local const function bounds(d: Dynamic, lo: String, hi: String, r: Dynamic?): Dy
   when (r?.max != null) { [hi] = r.max }
 }
 
-/// The keywords that say "no newline anywhere", which hold whatever the engine
-/// does with `$`.
-local noNewline: Dynamic = new Dynamic { pattern = "\\n" }
+/// The keywords that say "no line break anywhere", which hold whatever the
+/// engine does with `$` and `.`.
+local noLineBreak: Dynamic = new Dynamic { pattern = Model.lineBreakClass }
 
 /// The schema of a node used as a property type or an item type.
 function ofNode(n: Model.Node): Dynamic =
@@ -50,7 +54,7 @@ local function body(n: Model.Node): Dynamic =
       when (n.length?.max != null) { maxLength = n.length.max }
       when (n.pattern != null) {
         pattern = n.pattern.regex
-        not = noNewline
+        not = noLineBreak
       }
       when (n.format != null) { format = n.format.name }
     }
@@ -65,7 +69,7 @@ local function body(n: Model.Node): Dynamic =
   else if (n.kind == "map")
     (new Dynamic { type = "object" }) {
       when (n.key.pattern != null) {
-        propertyNames = new Dynamic { pattern = n.key.pattern.regex; not = noNewline }
+        propertyNames = new Dynamic { pattern = n.key.pattern.regex; not = noLineBreak }
       }
       when (n.items.kind != "any") { additionalProperties = ofNode(n.items) }
     }

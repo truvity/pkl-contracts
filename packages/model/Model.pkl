@@ -2,20 +2,40 @@
 /// probes and the lint of this repository read too.
 ///
 /// This is where `pkl:reflect`'s gaps are paid for once: it has no constrained
-/// type (so constraints come from annotations on aliases), no way to tell an
-/// explicit default from an implicit one (so optional means nullable, and an
-/// object-valued property that is not nullable is required), and no module
-/// graph (so the modules to generate for are given to the generator, which
-/// reads each one's own declarations).
+/// type (so constraints come from annotations on aliases and on properties), no
+/// way to tell an explicit default from an implicit one (so optional means
+/// nullable, and an object-valued property is required unless its default
+/// differs from what its class declares), and no module graph (so the modules to
+/// generate for are given to the generator, which reads each one's own
+/// declarations).
 module contracts.model.Model
 
 import "pkl:reflect"
 
+/// Every character that ends a line in some regular-expression engine, as the
+/// vocabulary's `lineBreaks` lists them (`test/ProbesTest.pkl` checks the two
+/// are equal). A generator emits, per target, a guard that refuses a string that
+/// contains any of them.
+const lineBreaks: List<String> =
+  List("\n", "\r", "\u{C}", "\u{B}", "\u{85}", "\u{2028}", "\u{2029}")
+
+/// The same, as a regular-expression character class that every engine reads
+/// alike: `\n`, `\r` and `\f` and the two-digit hex escapes `\x0B` and `\x85` are
+/// common to all of them (`\v` is a vertical-space class in Java and a vertical
+/// tab elsewhere), and no escape for U+2028 and U+2029 is, so those two are the
+/// characters themselves (a JSON renderer escapes them, so a schema carries
+/// `\u2028`).
+const lineBreakClass: String = "[\\n\\r\\f\\x0B\\x85\u{2028}\u{2029}]"
+
 class Node {
   /// string integer number boolean enum list map object open any union
   kind: String
-  /// The vocabulary alias this type was spelled with, if any.
+  /// The vocabulary alias this type was spelled with, if any. Absent for a
+  /// property whose own `@Range` or `@Length` narrowed the alias: that type is no
+  /// longer the alias, and is written out in full (`aliasBase` still names it).
   alias: String?
+  /// The alias a property-level annotation narrowed, for a reader's label.
+  aliasBase: String?
   doc: String?
   items: Node?
   key: Node?
@@ -41,6 +61,9 @@ class Prop {
   hasDefault: Boolean
   default: Any
   doc: String?
+  /// The schema requires it and a chart's defaults leave it out (`@SetAtInstall`).
+  /// It is nullable in Pkl, so that the module of defaults need not set it.
+  setAtInstall: Boolean = false
   /// The property's value NAMES a secret (an environment variable, a Secret and
   /// key); it is never the secret itself. Read from the contract's own
   /// convention, because the vocabulary has no annotation for it: a property
@@ -127,7 +150,10 @@ local function union(t: reflect.UnionType): Node =
 local function declared(t: reflect.DeclaredType): Node =
   let (r = t.referent)
     if (r is reflect.TypeAlias)
-      withAnnots(nodeOf(r.referent), r.annotations, r.docComment, r.name)
+      if (nullableMember(r.referent))
+        throw(nullableMemberMessage("alias `\(r.name)`"))
+      else
+        withAnnots(nodeOf(r.referent), r.annotations, r.docComment, r.name)
     else if (r.enclosingDeclaration.uri == "pkl:base")
       base(r.name, t)
     else if (r.name == "ModuleClass")
@@ -163,6 +189,12 @@ local function jsonValue(v: Any): Any =
     v.toList().map((e) -> jsonValue(e))
   else if (v is Mapping)
     v.toMap().mapValues((_, e) -> jsonValue(e))
+  else if (v is Dynamic || v is Typed)
+    // An object, as a document has it: an absent value is not a `null`.
+    v
+      .toMap()
+      .filter((_, e) -> e != null)
+      .mapValues((_, e) -> jsonValue(e))
   else
     v
 
@@ -171,26 +203,158 @@ local function namesSecret(n: Node): Boolean =
     || (n.kind == "map" && namesSecret(n.items))
     || (n.kind == "list" && namesSecret(n.items))
 
-local function propOf(pname: String, p: reflect.Property): Prop =
-  let (n = nodeOf(p.type))
-  let (nullable = p.type is reflect.NullableType)
-    new Prop {
-      name = pname
-      type = n
-      doc = p.docComment
-      secret = pname.endsWith("Env") || namesSecret(n)
-      required = !nullable && (if (isScalarish(n)) p.defaultValue == null else true)
-      hasDefault = isScalarish(n) && p.defaultValue != null
-      default = if (isScalarish(n) && p.defaultValue != null) jsonValue(p.defaultValue) else null
-    }
+/// Whether a union anywhere in `t` has a nullable member. `X | Y?` is `X | (Y?)`:
+/// the `?` binds to the last member only, so the field a reader takes for
+/// "nullable X or Y" is nullable in Pkl and REQUIRED everywhere a generator reads
+/// reflection, which is how a typo becomes a contract. `(X | Y)?` says it.
+local function nullableMember(t: reflect.Type): Boolean =
+  if (t is reflect.NullableType)
+    nullableMember(t.member)
+  else if (t is reflect.UnionType)
+    t.members.any((m) -> m is reflect.NullableType || nullableMember(m))
+  else if (t is reflect.DeclaredType)
+    t.typeArguments.any((a) -> nullableMember(a))
+  else
+    false
 
-local function propsOf(props: Map<String, reflect.Property>): List<Prop> =
+local function nullableMemberMessage(where: String): String =
+  "\(where): a union with a nullable member. `X | Y?` makes only `Y` nullable; write `(X | Y)?`"
+
+/// The narrowest of two ranges (or lengths): a property's own bound can only
+/// tighten what its type already says, because Pkl enforces both.
+local function narrower(where: String, a: Dynamic?, b: Dynamic): Dynamic =
+  if (a == null)
+    b
+  else
+    let (
+      lo =
+        if (a.min == null)
+          b.min
+        else if (b.min == null)
+          a.min
+        else if (a.min > b.min)
+          a.min
+        else
+          b.min
+    )
+    let (
+      hi =
+        if (a.max == null)
+          b.max
+        else if (b.max == null)
+          a.max
+        else if (a.max < b.max)
+          a.max
+        else
+          b.max
+    )
+      if (lo != null && hi != null && lo > hi)
+        throw(
+          "\(where): the bound of the property and the one of its type leave no value (from \(lo) to \(hi))"
+        )
+      else
+        new Dynamic { min = lo; max = hi }
+
+/// The type of a property, with the `@Range` and `@Length` the property itself
+/// carries laid over the type's own. They narrow a number or a string and
+/// nothing else; the type is then no longer the alias (zod and pydantic would
+/// refer to the alias by name and lose the bound), so it is spelled out.
+local function narrowed(where: String, n: Node, a: List<Annotation>): Node =
+  let (r = find(a, "Range"))
+  let (l = find(a, "Length"))
+    if (r == null && l == null)
+      n
+    else if (r != null && n.kind != "integer" && n.kind != "number")
+      throw("\(where): @Range is for a number, and this property is \(n.kind)")
+    else if (l != null && n.kind != "string")
+      throw("\(where): @Length is for a string, and this property is \(n.kind)")
+    else
+      (n) {
+        alias = null
+        aliasBase = n.alias ?? n.aliasBase
+        when (r != null) { range = narrower(where, n.range, r) }
+        when (l != null) { length = narrower(where, n.length, l) }
+      }
+
+/// What Pkl gives a property of type `t` when nobody sets it: an instance of
+/// the class with every default in place.
+local function implicit(t: reflect.Type): Any =
+  if (t is reflect.DeclaredType)
+    let (r = t.referent)
+      if (r is reflect.TypeAlias)
+        implicit(r.referent)
+      else if (r.enclosingDeclaration.uri == "pkl:base")
+        if (r.name == "Dynamic") new Dynamic {} else null
+      else if (r.name == "ModuleClass")
+        null
+      else
+        new Dynamic {}.toTyped((r as reflect.Class).reflectee)
+  else
+    null
+
+/// Whether an object-valued property was given a default of its own. Reflection
+/// cannot tell, but it can compare: the property's default against what its
+/// class declares for itself. A default that is exactly the class's own is none
+/// (the fields carry their defaults), which is why such a property is required.
+local function explicitObject(p: reflect.Property): Boolean =
+  !isModuleType(p.type)
+    && p.defaultValue != null
+    && p.defaultValue.toString() != implicit(p.type).toString()
+
+/// A property whose type is a module (`config: ServiceConfig`): its default is
+/// the module's own, not a default the property was given.
+local function isModuleType(t: reflect.Type): Boolean =
+  if (t is reflect.NullableType)
+    isModuleType(t.member)
+  else if (t is reflect.DeclaredType)
+    let (r = t.referent)
+      if (r is reflect.TypeAlias) isModuleType(r.referent) else r.name == "ModuleClass"
+  else
+    false
+
+local function propOf(where: String, pname: String, p: reflect.Property): Prop =
+  let (here = "\(where).\(pname)")
+  let (n = narrowed(here, nodeOf(p.type), p.annotations))
+  let (nullable = p.type is reflect.NullableType)
+  let (atInstall = find(p.annotations, "SetAtInstall") != null)
+  let (explicit = !isScalarish(n) && explicitObject(p))
+    if (nullableMember(p.type))
+      throw(nullableMemberMessage(here))
+    else if (atInstall && !nullable)
+      throw(
+        "\(here): @SetAtInstall needs a nullable type (`V.NonEmptyString?`), so that the module of defaults can leave it out"
+      )
+    else if (atInstall && p.defaultValue != null)
+      throw("\(here): @SetAtInstall and a default contradict: the default is what it leaves out")
+    else if (atInstall && n.kind == "string" && (n.length?.min ?? 0) < 1)
+      throw(
+        "\(here): @SetAtInstall on a string needs a non-empty type (`V.NonEmptyString`): the schema must require a real value"
+      )
+    else
+      new Prop {
+        name = pname
+        type = n
+        doc = p.docComment
+        setAtInstall = atInstall
+        secret = pname.endsWith("Env") || namesSecret(n)
+        required =
+          atInstall
+            || (!nullable && !explicit && (if (isScalarish(n)) p.defaultValue == null else true))
+        hasDefault = if (isScalarish(n)) p.defaultValue != null else explicit
+        default =
+          if (isScalarish(n) && p.defaultValue != null || explicit)
+            jsonValue(p.defaultValue)
+          else
+            null
+      }
+
+local function propsOf(where: String, props: Map<String, reflect.Property>): List<Prop> =
   props
     .toMap()
     .filter((_, p) -> !p.modifiers.contains("hidden") && !p.modifiers.contains("local"))
     .toMap()
     .entries
-    .map((e) -> propOf(e.first, e.second))
+    .map((e) -> propOf(where, e.first, e.second))
 
 local function classOf(c: reflect.Class): Cls =
   let (mod = c.enclosingDeclaration)
@@ -198,7 +362,7 @@ local function classOf(c: reflect.Class): Cls =
     new Cls {
       qname = qualify(short(mod.name), c.name)
       doc = c.docComment
-      props = propsOf(c.properties)
+      props = propsOf(c.name, c.properties)
       when (
         sup != null
           && sup.enclosingDeclaration.uri != "pkl:base"
@@ -222,7 +386,11 @@ local function fromMirror(mm: reflect.Module): Node =
           doc = mm.docComment
           // A document that extends another is its own properties and an `allOf`; a
           // chart is everything it inherits, because it has no base to compose.
-          props = propsOf(if (hasBase) mm.moduleClass.properties else mm.moduleClass.allProperties)
+          props =
+            propsOf(
+              short(mm.name),
+              if (hasBase) mm.moduleClass.properties else mm.moduleClass.allProperties,
+            )
           isOpen = mm.modifiers.contains("open")
           when (hasBase) { base = fromMirror(sup) }
         }
@@ -329,11 +497,58 @@ function documents(modules: List<Module>): Mapping<String, Node> =
         .distinctBy((n) -> n.schema.id)
         .sortBy((n) -> key(n))
   )
-    new Mapping {
-      for (n in all) {
-        [key(n)] = n
+  let (shared = inlineEnumProblems(classes(all + modules.map((m) -> chartOf(m)).filterNonNull())))
+    if (shared.isEmpty)
+      new Mapping {
+        for (n in all) {
+          [key(n)] = n
+        }
       }
-    }
+    else
+      throw("an inline union of literals is used in more than one place:\n  " + shared.join("\n  "))
+
+/// The inline unions of string literals (`"a" | "b"`, two members or more) in the
+/// properties of one class, with where each is. A type that is an alias (a
+/// vocabulary enum) is not inline, and a property that holds a list or a map of
+/// them counts too.
+local function inlineEnums(c: Cls): List<Pair<String, List<String>>> =
+  c.props.flatMap((p) -> inlineIn(p.type).map((vs) -> Pair("\(c.qname).\(p.name)", vs)))
+
+local function inlineIn(n: Node): List<List<String>> =
+  if (n.alias != null)
+    List()
+  else if (n.kind == "enum" && n.values.length >= 2)
+    List(n.values)
+  else if (n.kind == "list")
+    inlineIn(n.items)
+  else if (n.kind == "map")
+    inlineIn(n.key) + inlineIn(n.items)
+  else if (n.kind == "union")
+    n.members.flatMap((m) -> inlineIn(m))
+  else
+    List()
+
+/// The inline literal unions that two properties of `nodes` (classes) share, or
+/// overlap on: such a union is one concept written twice, and belongs in the
+/// vocabulary as an enum, where it is one name for every contract. A union used
+/// in ONE place is fine inline. Each problem is a sentence.
+function inlineEnumProblems(nodes: List<Node>): List<String> =
+  let (
+    all =
+      nodes
+        .filter((n) -> n.kind == "object")
+        .flatMap((n) -> inlineEnums(n.cls))
+  )
+    all
+      .mapIndexed((i, a) ->
+        all
+          .drop(i + 1)
+          .filter((b) -> a.second.any((v) -> b.second.contains(v)))
+          .map((b) ->
+            "`\(a.first)` (\(a.second.map((v) -> literal(v)).join(" | "))) and `\(b.first)` (\(b.second.map((v) -> literal(v)).join(" | "))) overlap: one concept in two places, so make it an enum in the vocabulary"
+          )
+      )
+      .flatten()
 
 /// The chart module `m` is, or amends: the module annotated `@Chart`, or null.
 function chartOf(m: Module): Node? =
@@ -360,6 +575,8 @@ function literal(v: Any): String =
     "\"\(v)\""
   else if (v is List)
     "[\(v.map((e) -> literal(e)).join(", "))]"
+  else if (v is Map)
+    "{\(v.entries.map((e) -> "\(literal(e.first)): \(literal(e.second))").join(", "))}"
   else
     "\(v)"
 
@@ -368,6 +585,8 @@ function literal(v: Any): String =
 function typeLabel(n: Node): String =
   if (n.alias != null)
     n.alias
+  else if (n.aliasBase != null)
+    n.aliasBase
   else if (n.kind == "object")
     n.cls.qname
   else if (n.kind == "enum")
@@ -411,7 +630,7 @@ function constraintsOf(n: Node): List<String> =
             "at most \(n.length.max) characters",
         )
     )
-    + (if (n.pattern == null) List() else List("matches `\(n.pattern.regex)`, never a newline"))
+    + (if (n.pattern == null) List() else List("matches `\(n.pattern.regex)`, never a line break"))
     + (if (n.format == null) List() else List("format `\(n.format.name)`"))
     + (
       if (n.requiresKeys == null)
