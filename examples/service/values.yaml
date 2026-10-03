@@ -14,6 +14,11 @@ config:
   archive:
     prefix: echo/requests
     batchSeconds: 60
+  client:
+    timeoutSeconds: 5
+    retry:
+      attempts: 3
+      idempotentOnly: true
 images:
   echo:
     registry: registry.example.com

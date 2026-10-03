@@ -69,6 +69,10 @@
 | `config.archive.bucket` | NonEmptyString |  | **Set at install.** The bucket. Every install names its own, so the defaults leave it out and the schema requires it. |
 | `config.archive.prefix` | NonEmptyString | `"echo/requests"` | What every object's key begins with. |
 | `config.archive.batchSeconds` | PositiveInt | `60` | How often a batch is written, in seconds: not more often than every ten. |
+| `config.client.timeoutSeconds` | PositiveInt | `5` | How long one call may take, in seconds. |
+| `config.client.retry.attempts` | PositiveInt | `3` | How many attempts in all. |
+| `config.client.retry.idempotentOnly` | boolean | `true` | Whether a call that is not safe to repeat is repeated too. |
+| `config.client.proxy` | NonEmptyString |  | A proxy to go through; absent means none. |
 | `images.echo.registry` | string |  | The registry host. Left out, the repository is read as the whole name. |
 | `images.echo.repository` | NonEmptyString |  | **Required.** The repository path, without the registry and without a tag. |
 | `images.echo.tag` | string |  | The tag. Empty or absent when there is a digest. |
