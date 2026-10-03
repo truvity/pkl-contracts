@@ -1,0 +1,38 @@
+/// The one version of this repository, and the one place the package metadata
+/// that depends on it is written.
+///
+/// Every package is released together, under the repository's tag `vX.Y.Z`:
+/// the tag, the version here and the version of each package are the same
+/// string. `hack/lint.sh` refuses a tag-shaped value anywhere else.
+///
+/// A package URI is GitHub-only. Its base is the release's download path, so
+/// the version appears twice: in the tag directory and after the `@`.
+///
+///     package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.vocab@0.1.0
+///
+/// resolves, over HTTPS, to the release asset `contracts.vocab@0.1.0` (the
+/// package's metadata); its archive is the asset `contracts.vocab@0.1.0.zip`.
+module contracts.Release
+
+import "pkl:Project"
+
+/// The repository-wide version.
+version = "0.1.0"
+
+local repository = "truvity/pkl-contracts"
+
+/// The `package` block of a package's `PklProject`.
+function metadata(packageName: String, summary: String): Project.Package = new {
+  name = packageName
+  version = module.version
+  baseUri = "package://github.com/\(repository)/releases/download/v\(module.version)/\(packageName)"
+  packageZipUrl =
+    "https://github.com/\(repository)/releases/download/v\(module.version)/\(packageName)@\(module.version).zip"
+  description = summary
+  license = "MIT"
+  website = "https://github.com/\(repository)"
+  sourceCode = "https://github.com/\(repository)"
+  sourceCodeUrlScheme =
+    "https://github.com/\(repository)/blob/v\(module.version)/packages/\(packageName.split(".").last)%{path}#L%{line}-L%{endLine}"
+  issueTracker = "https://github.com/\(repository)/issues"
+}

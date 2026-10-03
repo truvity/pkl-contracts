@@ -1,0 +1,9 @@
+amends "pkl:Project"
+
+import "../Release.pkl"
+
+package =
+  Release.metadata(
+    "contracts.vocab",
+    "The constrained vocabulary of a data contract: named types that mean the same thing wherever they appear, and the annotations a generator reads.",
+  )
