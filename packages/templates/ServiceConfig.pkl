@@ -14,6 +14,7 @@ open module contracts.templates.ServiceConfig
 
 import "@fragments/Fragments.pkl" as F
 import "@vocab/Annotations.pkl" as A
+import "@vocab/Check.pkl"
 
 /// The health listener. Required: every component can be probed.
 probes: F.Probes
@@ -24,3 +25,11 @@ log: F.Log?
 /// The shutdown budget. Absent means the service's own default, which is only
 /// correct if nothing external is counting.
 drain: F.Drain?
+
+/// How the module renders: the module itself, once checked against the bounds its
+/// properties carry.
+output {
+  // Rendering the configuration checks the bounds the properties carry
+  // (`@A.Range`, `@A.Length` on a property), which Pkl cannot see in a type.
+  value = Check.checked(module)
+}

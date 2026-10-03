@@ -13,7 +13,11 @@ class Schema extends Annotation {
   title: String?
 }
 
-/// A numeric range, inclusive at both ends.
+/// A numeric range, inclusive at both ends. On an alias it is the alias's own
+/// range; on a PROPERTY it narrows the type the property has (the two are
+/// intersected, so a property can only tighten what its type already says), and
+/// `Check.pkl` makes Pkl enforce it: Pkl itself has no constraint a property
+/// could carry.
 class Range extends Annotation {
   /// The least value allowed. Absent means unbounded.
   min: Number?
@@ -22,7 +26,8 @@ class Range extends Annotation {
   max: Number?
 }
 
-/// A string length bound.
+/// A string length bound. Like `Range`, it is an alias's own, or, on a property,
+/// narrows the property's type and is enforced by `Check.pkl`.
 class Length extends Annotation {
   /// The fewest characters allowed. Absent means unbounded.
   min: Int?
@@ -56,6 +61,20 @@ class Pattern extends Annotation {
   /// Values the alias refuses. At least one.
   invalid: Listing<String>(!isEmpty)
 }
+
+/// A property the schema REQUIRES and a chart's default values leave out: a
+/// bucket name, a host, a password Secret. A default of `""` would pass a
+/// `NonEmptyString` only by not being one, and would let an install that forgot
+/// the value fail somewhere else, later; so the key is absent from the defaults
+/// (`values.yaml`) and the schema refuses a document that does not set it.
+///
+/// Put it on a property whose type is a NON-EMPTY string alias (the schema's
+/// requirement of a value is then a requirement of a real one) and which is
+/// nullable in Pkl (`V.NonEmptyString?`), so that the module that holds the
+/// defaults need not set it. The annotation is what turns "nullable" into
+/// "required" for every generator and for the test loader. It is never
+/// combined with a default.
+class SetAtInstall extends Annotation {}
 
 /// A JSON Schema `format`: documentation, not validation.
 class Format extends Annotation {

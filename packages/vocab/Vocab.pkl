@@ -24,8 +24,12 @@
 /// repository):
 ///
 ///   - a pattern has JSON Schema SEARCH semantics (`contains(Regex(...))`, never
-///     `matches`, which is a full match), and no value containing a newline is
-///     admitted, whatever the pattern says: `$` is not portable;
+///     `matches`, which is a full match), and no value containing a LINE BREAK
+///     (`lineBreaks`: LF, CR, FF, VT, NEL, LS, PS) is admitted, whatever the
+///     pattern says: `$` and `.` are not portable, because the engines disagree
+///     on which characters end a line. A pattern also never spells `.`, `\s`,
+///     `\d`, `\w` or `\b`, which the engines read differently (Unicode-aware or
+///     ASCII); it uses an explicit class (`space`, `anyChar`, `[0-9]`);
 ///   - `null` is not a value for an optional field;
 ///   - an integral float is an integer;
 ///   - a field with a default is optional.
@@ -33,10 +37,34 @@ module contracts.vocab.Vocab
 
 import "Annotations.pkl" as A
 
-/// A regular expression with search semantics that refuses a newline anywhere.
+/// Every character that ends a line in some engine: LF, CR, FF, VT, NEL, LS and
+/// PS. ECMAScript, RE2, Python and Java do not agree on which of them `.` stops
+/// at or `$` matches before, so a value containing ANY of them is refused by
+/// every pattern alias, and a generator says the same in its own output. The
+/// generators read the same list from `contracts.model`; `test/ProbesTest.pkl`
+/// checks the two are equal.
+const lineBreaks: List<String> =
+  List("\n", "\r", "\u{C}", "\u{B}", "\u{85}", "\u{2028}", "\u{2029}")
+
+/// A regular expression with search semantics that refuses a line break anywhere.
 /// Every pattern alias is written with it, so that the rule has one spelling.
 local const function search(s: String, re: String): Boolean =
-  !s.contains("\n") && s.contains(Regex(re))
+  !lineBreaks.any((b) -> s.contains(b)) && s.contains(Regex(re))
+
+/// White space, spelled out for a character class (`[^\(space)]`): space, tab,
+/// the no-break space and the Unicode space separators. It is ECMAScript's `\s`
+/// without the line breaks (which `search` refuses anyway), so it is the widest
+/// reading and the strictest, and every engine, which would otherwise read `\s`
+/// as ASCII only (Java, RE2) or as Unicode (ECMAScript, Python), agrees. The
+/// characters above U+00FF are written in the pattern itself, because no escape
+/// for them is common to every engine (RE2 has no `\u`, ECMAScript no `\x{...}`);
+/// `\xA0`, the no-break space, is a two-digit escape they all share.
+local const space = "\\t \\xA0\u{1680}\u{2000}-\u{200A}\u{202F}\u{205F}\u{3000}"
+
+/// Any character, where a pattern would have used `.`: "any but a line feed", and
+/// a line feed is the one escape every engine reads alike. No other line break
+/// reaches the pattern (`search` refuses them first), so this is any character.
+local const anyChar = "[^\\n]"
 
 // ----------------------------------------------------------- numbers and sizes
 
@@ -73,6 +101,30 @@ local const bytesRe = #"^[0-9]+(Ki|Mi|Gi|Ti|K|M|G|T)?$"#
 }
 typealias Bytes = String(search(this, bytesRe))
 
+local const quantityRe = #"^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E)?$"#
+
+/// A Kubernetes quantity: a decimal number with an optional SI or binary suffix,
+/// `256Ki`, `500m`, `1.5Gi`, `2`. Never empty: a field that may be left out is
+/// `Quantity?`, absent, and not a `""`.
+@A.Pattern {
+  regex = quantityRe
+  valid { "256Ki"; "500m"; "1.5Gi"; "2"; "64k" }
+  invalid { ""; "-1"; "1..5"; "Ki"; "10mb"; "1 Gi" }
+}
+typealias Quantity = String(search(this, quantityRe))
+
+local const bufferLimitRe = #"^[0-9]+(Ki|Mi|Gi|k|M|G)?$"#
+
+/// A whole number of bytes with an optional `Ki`, `Mi`, `Gi`, `k`, `M` or `G`:
+/// the spelling of a gateway's request buffer limit (`256Ki`). Narrower than
+/// `Quantity` (no fraction, no `Ti`, no milli), and never empty.
+@A.Pattern {
+  regex = bufferLimitRe
+  valid { "256Ki"; "1048576"; "1M"; "64k" }
+  invalid { ""; "1Ti"; "1.5Mi"; "-1"; "Ki"; "1 Mi" }
+}
+typealias BufferLimit = String(search(this, bufferLimitRe))
+
 local const durationRe = #"^[0-9]+(ns|us|µs|ms|s|m|h)$"#
 
 /// A duration in Go's spelling, as a string: `10s`, `500ms`. Pkl's own
@@ -106,7 +158,7 @@ local const hostnameRe =
 }
 typealias Hostname = String(search(this, hostnameRe))
 
-local const hostPortRe = #"^[^\s]*:[0-9]{1,5}$"#
+local const hostPortRe = "^[^\(space)]*:[0-9]{1,5}$"
 
 /// host:port as the configuration contract spells it today. It does NOT bound
 /// the port at 65535, because the hand-written pattern does not; `Port` is the
@@ -114,7 +166,7 @@ local const hostPortRe = #"^[^\s]*:[0-9]{1,5}$"#
 @A.Pattern {
   regex = hostPortRe
   valid { ":8080"; "127.0.0.1:80" }
-  invalid { "8080"; "host"; "a b:80"; ":123456" }
+  invalid { "8080"; "host"; "a b:80"; ":123456"; "a\tb:80"; "a\u{A0}b:80"; "a\u{3000}b:80" }
 }
 typealias HostPort = String(search(this, hostPortRe))
 
@@ -138,10 +190,10 @@ local const digestRe = #"^(sha256:[0-9a-f]{64})?$"#
 }
 typealias ImageDigest = String(search(this, digestRe))
 
-local const absPathRe = #"^/.+"#
+local const absPathRe = "^/\(anyChar)+"
 
 /// An absolute path that is not the root.
-@A.Pattern { regex = absPathRe; valid { "/etc/x" }; invalid { "etc/x"; "/" } }
+@A.Pattern { regex = absPathRe; valid { "/etc/x"; "/a b" }; invalid { "etc/x"; "/" } }
 typealias AbsPath = String(search(this, absPathRe))
 
 local const rootedRe = #"^/"#
@@ -166,18 +218,18 @@ local const originRe = #"^https?://[A-Za-z0-9.*-]+(:[0-9]+)?$"#
 }
 typealias HttpOrigin = String(search(this, originRe))
 
-local const reportUriRe = #"^[^\s;,'"]*$"#
+local const reportUriRe = "^[^\(space);,'\"]*$"
 
 /// Where a browser reports a violation: empty, a path or an absolute URL, with
 /// nothing that would end a directive.
 @A.Pattern {
   regex = reportUriRe
   valid { ""; "/r"; "https://r.example/x" }
-  invalid { "a b"; "a;b"; "a'b" }
+  invalid { "a b"; "a;b"; "a'b"; "a\u{A0}b" }
 }
 typealias ReportUri = String(search(this, reportUriRe))
 
-local const collectorRe = #"^(https://[^\s'"<>;,]+|/[^\s'"<>;,?#]*)$"#
+local const collectorRe = "^(https://[^\(space)'\"<>;,]+|/[^\(space)'\"<>;,?#]*)$"
 
 /// Where a page posts telemetry: a path on its own origin, or an absolute
 /// HTTPS URL.
@@ -194,13 +246,17 @@ local const publicKeyRe = #"^[A-Za-z0-9._~-]*$"#
 @A.Pattern { regex = publicKeyRe; valid { ""; "ab.C_1~-" }; invalid { "a b"; "a/b" } }
 typealias PublicKey = String(search(this, publicKeyRe))
 
-local const urlPathRe = #"^/[^\s'"<>;,?#]*$"#
+local const urlPathRe = "^/[^\(space)'\"<>;,?#]*$"
 
 /// A path on the same origin, without a query or a fragment.
-@A.Pattern { regex = urlPathRe; valid { "/"; "/faro/collect" }; invalid { "faro"; "/a?b" } }
+@A.Pattern {
+  regex = urlPathRe
+  valid { "/"; "/faro/collect" }
+  invalid { "faro"; "/a?b"; "/a b"; "/a\u{A0}b" }
+}
 typealias UrlPath = String(search(this, urlPathRe))
 
-local const urlPathOrEmptyRe = #"^(/[^\s'"<>;,?#]*)?$"#
+local const urlPathOrEmptyRe = "^(/[^\(space)'\"<>;,?#]*)?$"
 
 /// A `UrlPath`, or empty.
 @A.Pattern { regex = urlPathOrEmptyRe; valid { ""; "/x" }; invalid { "x"; "/a?b" } }
