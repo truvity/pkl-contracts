@@ -45,10 +45,10 @@ bin/pkl run --project-dir test packages/jsonschema/Compat.pkl -- --before "$tmp/
 echo "compat: this checkout against $tag"
 
 if grep -q '^BREAKING' "$report"; then
-  if awk '/^## Unreleased/{f=1;next} /^## /{f=0} f' CHANGELOG.md | grep -qi 'breaking'; then
+  if awk '/^## Unreleased/{f=1;next} /^## /{f=0} f' CHANGELOG.md | grep -q '^- \*\*Breaking'; then
     echo "compat: breaking changes, and the CHANGELOG's Unreleased section says so"
     exit 0
   fi
-  echo "compat: breaking changes against $tag; say so in the CHANGELOG (the word 'breaking' under '## Unreleased') if they are meant" >&2
+  echo "compat: breaking changes against $tag; say so in the CHANGELOG (an entry that begins \"- **Breaking\" under '## Unreleased') if they are meant" >&2
   exit 1
 fi
