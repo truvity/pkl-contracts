@@ -7,6 +7,8 @@ under one version, so a heading covers all three.
 
 ## Unreleased
 
+## v0.1.0 — 2026-10-03
+
 ### Packages
 
 - **`contracts.vocab`: the constrained vocabulary of a data contract.** Named

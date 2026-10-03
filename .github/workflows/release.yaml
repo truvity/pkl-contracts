@@ -1,0 +1,26 @@
+# Releases every package in packages/ on a `vX.Y.Z` tag, through the shared
+# workflow (truvity/ci-workflows): the tag must equal the version in
+# packages/Release.pkl and have its CHANGELOG heading; `just package` builds
+# the assets; each is uploaded to the GitHub Release under its exact name, and
+# each package is then resolved from github.com to prove a consumer can.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    uses: truvity/ci-workflows/.github/workflows/release-pkl.yaml@22a873d94abaf79e5be9b7a3fc41fdb1361bb7e7 # v3.22.0
+    with:
+      version-command: sed -n 's/^version = "\(.*\)"$/\1/p' packages/Release.pkl
+      pkl-command: bin/pkl
+      smoke-import: |
+        contracts.vocab#/Vocab.pkl
+        contracts.fragments#/Fragments.pkl
+        contracts.templates#/ServiceConfig.pkl
