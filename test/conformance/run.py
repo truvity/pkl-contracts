@@ -27,6 +27,7 @@ generated from the vocabulary's annotations (`Probes.pkl`), and, for each chart,
 its generated values against its generated values schema. Kotlin is behind
 `--kotlin` because Gradle makes it the slow part; the other engines run without.
 """
+import copy
 import json
 import os
 import shutil
@@ -49,7 +50,33 @@ HELM = WORK / "helm"
 TIMES: dict[str, float] = {}
 
 SCHEMA_ONLY = ("ajv", "santhosh", "pyjsonschema", "networknt")
-CHARTS = {"web": "WebValues", "stat": "StatValues", "migrate": "MigrateValues"}
+CHARTS = {"web": "WebValues", "stat": "StatValues", "migrate": "MigrateValues", "cond": "CondValues"}
+
+
+def put(values, path, value):
+    """A copy of `values` with `value` at the dotted `path`; `None` removes the key."""
+    out = copy.deepcopy(values)
+    node = out
+    for step in path[:-1]:
+        node = node.setdefault(step, {})
+    if value is None:
+        node.pop(path[-1], None)
+    else:
+        node[path[-1]] = value
+    return out
+
+
+# Edits of a chart's defaults beyond the two every chart gets, for the rules across
+# fields on its own module: (label, name, edit). The defaults give `database.host`.
+CHART_EDITS = {
+    "cond": [
+        ("bad", "host-missing", lambda v: put(v, ["database", "host"], None)),
+        ("bad", "active-without-upstream", lambda v: put(v, ["phase"], "active")),
+        ("ok", "active-with-upstream", lambda v: put(put(v, ["phase"], "active"), ["upstream", "url"], "https://up.example")),
+        ("ok", "remote-without-host", lambda v: put(put(v, ["database", "host"], None), ["alerts", "remote", "enabled"], True)),
+        ("bad", "remote-disabled-without-host", lambda v: put(put(v, ["database", "host"], None), ["alerts", "remote", "enabled"], False)),
+    ],
+}
 
 
 def sh(step, cmd, cwd=ROOT, check=True, **kw):
@@ -99,7 +126,9 @@ def manifest():
     # never failed. Each is now a fixture of the `showcase` document, refused by
     # every engine like any other; a new finding of this kind is a fixture too.
     for p in sorted((WORK / "probes").glob("*.json")):
-        doc(f"probe/{p.stem}", "showcase", p, p.stem.split("-")[0])
+        # `<ok|bad>-conditions-<n>` is a whole document of the `conditions` contract (its
+        # rules across fields); every other probe is one property of the showcase.
+        doc(f"probe/{p.stem}", "conditions" if p.stem.startswith(("ok-conditions-", "bad-conditions-")) else "showcase", p, p.stem.split("-")[0])
     # A chart's generated values must satisfy its generated values schema, which
     # embeds every document it refers to: nothing is fetched. Two edits of the
     # defaults, each of which must be refused.
@@ -108,10 +137,11 @@ def manifest():
         values = yaml.safe_load((d / "values.yaml").read_text())
         broken = {"digest": {**values, "images": {name: {**values["images"][name], "digest": "sha256:abc"}}},
                   "unknown-key": {**values, "bogus": 1}}
-        for label, path, instance in [("ok", d / "values.yaml", None)] + [("bad", d / f"bad-{k}.yaml", v) for k, v in broken.items()]:
+        extra = [(label, d / f"{label}-{key}.yaml", edit(values)) for label, key, edit in CHART_EDITS.get(name, [])]
+        for label, path, instance in [("ok", d / "values.yaml", None)] + [("bad", d / f"bad-{k}.yaml", v) for k, v in broken.items()] + extra:
             if instance is not None:
                 path.write_text(yaml.safe_dump(instance))
-            entries.append({"id": f"chart/{name}/{path.stem.removeprefix('bad-')}", "schema": "", "path": str(path), "label": label,
+            entries.append({"id": f"chart/{name}/{path.stem.removeprefix('bad-').removeprefix('ok-')}", "schema": "", "path": str(path), "label": label,
                             "typed": False, "schemaPath": str(d / "values.schema.json"), "selfContained": True})
     (WORK / "manifest.json").write_text(json.dumps(entries, indent=1))
     return entries

@@ -46,15 +46,63 @@ local function keys(names: List<String>, omit: String?): Dynamic = new Dynamic {
   }
 }
 
+/// The probes of a range: at and just outside each inclusive bound (one whole
+/// step for an integer, a small step for a number) and, for an exclusive bound,
+/// AT it (refused) and just inside and outside it.
+local function rangeProbes(n: Model.Node): List<Probe> =
+  let (r = n.range)
+  let (e = if (n.kind == "integer") 1 else 0.001)
+    (
+      if (r.min != null)
+        List(ok("range minimum", r.min), bad("below the range", r.min - 1))
+      else
+        List()
+    )
+      + (
+        if (r.min != null && n.kind == "number")
+          List(bad("just below the range", r.min - e))
+        else
+          List()
+      )
+      + (
+        if (r.max != null)
+          List(ok("range maximum", r.max), bad("above the range", r.max + 1))
+        else
+          List()
+      )
+      + (
+        if (r.max != null && n.kind == "number")
+          List(bad("just above the range", r.max + e))
+        else
+          List()
+      )
+      + (
+        if (r.exclusiveMin != null)
+          List(
+            bad("at the exclusive minimum", r.exclusiveMin),
+            ok("just above the exclusive minimum", r.exclusiveMin + e),
+            bad("just below the exclusive minimum", r.exclusiveMin - e),
+          )
+        else
+          List()
+      )
+      + (
+        if (r.exclusiveMax != null)
+          List(
+            bad("at the exclusive maximum", r.exclusiveMax),
+            ok("just below the exclusive maximum", r.exclusiveMax - e),
+            bad("just above the exclusive maximum", r.exclusiveMax + e),
+          )
+        else
+          List()
+      )
+      + List(bad("a string for a number", "1"))
+
 /// The probes of one property's type.
 function probesOf(n: Model.Node): List<Probe> =
   (
     if (n.range != null)
-      (if (n.range.min != null) List(ok("range minimum", n.range.min)) else List())
-        + (if (n.range.max != null) List(ok("range maximum", n.range.max)) else List())
-        + (if (n.range.min != null) List(bad("below the range", n.range.min - 1)) else List())
-        + (if (n.range.max != null) List(bad("above the range", n.range.max + 1)) else List())
-        + List(bad("a string for a number", "1"))
+      rangeProbes(n)
     else
       List()
   )
@@ -135,6 +183,19 @@ function probesOf(n: Model.Node): List<Probe> =
         List()
     )
     + (
+      if (n.denyKeys != null)
+        List(
+          ok("no key", new Dynamic {}),
+          ok("a key that is not denied", new Dynamic { allowed = "x" }),
+        )
+          + n.denyKeys.map((k) -> bad("the denied key `\(k)`", new Dynamic { [k] = "x" }))
+          + List(
+            bad("a denied key among others", new Dynamic { allowed = "x"; [n.denyKeys.last] = "x" }),
+          )
+      else
+        List()
+    )
+    + (
       if (n.kind == "integer" && n.range == null)
         List(ok("an integer", 3), bad("a string for an integer", "3"))
       else
@@ -147,3 +208,152 @@ function of(root: Model.Node): Mapping<String, List<Probe>> = new {
     [p.name] = probesOf(p.type)
   }
 }
+
+// ------------------------------------------------------ rules across fields
+
+/// `c`'s properties and those of the classes it extends, the base first.
+local function allProps(c: Model.Cls): List<Model.Prop> =
+  (if (c.base != null) allProps(c.base.cls) else List()) + c.props
+
+/// The property at the dotted path `path` below class `c`.
+local function leaf(c: Model.Cls, path: List<String>): Model.Prop =
+  let (p = allProps(c).find((x) -> x.name == path.first))
+    if (path.length == 1) p else leaf(p.type.cls, path.drop(1))
+
+/// A value that is valid for the property type `n`.
+local function sample(n: Model.Node): Any =
+  if (n.kind == "boolean")
+    true
+  else if (n.kind == "enum")
+    n.values.first
+  else if (n.kind == "integer" || n.kind == "number")
+    n.range?.min ?? (if (n.range?.exclusiveMin != null) n.range.exclusiveMin + 1 else 1)
+  else if (n.pattern != null)
+    n.pattern.valid.first
+  else
+    "x".repeat(n.length?.min ?? 1)
+
+/// An object with `value` at the dotted `path`.
+local function nest(path: List<String>, value: Any): Dynamic = new Dynamic {
+  [path.first] = if (path.length > 1) nest(path.drop(1), value) else value
+}
+
+/// Two documents laid together, objects merged where both have one.
+local function merge(a: Dynamic, b: Dynamic): Dynamic =
+  let (am = a.toMap())
+  let (bm = b.toMap())
+    new Dynamic {
+      for (k, v in am) {
+        when (!bm.containsKey(k)) { [k] = v }
+      }
+      for (k, v in bm) {
+        [k] =
+          if (am.containsKey(k) && am[k] is Dynamic && v is Dynamic)
+            merge(am[k] as Dynamic, v)
+          else
+            v
+      }
+    }
+
+local function mergeAll(docs: List<Dynamic>): Dynamic =
+  docs.fold(new Dynamic {}, (acc, d) -> merge(acc, d))
+
+/// The probes of one rule across fields, `d`, written on the class `c` that sits at
+/// `prefix` in the document, with `base` the rest of the document needs to be valid
+/// (the excuse of every `@RequiredUnless` of the module): the requirements met
+/// (accepted), each one missing and all missing (refused), the rule not applying
+/// (accepted) and, for an enum or a boolean, a value that is not in the list.
+local function probesOfRule(
+  d: Model.Condition,
+  c: Model.Cls,
+  prefix: List<String>,
+  base: Dynamic,
+  why: String,
+): List<Probe> =
+  let (wrap = (doc: Dynamic) -> if (prefix.isEmpty) doc else nest(prefix, doc))
+  let (condition = leaf(c, d.path).type)
+  let (listed = d.values.first)
+  let (other = unlisted(condition, d.values))
+  let (decides = (v: Any) -> wrap.apply(nest(d.path, v)))
+  // What makes the requirements apply: a listed value for `when`; for `unless`, any
+  // other (an absent one, or the value that is not listed).
+  let (applies = if (d.unless) new Dynamic {} else decides.apply(listed))
+  let (excused = if (d.unless) decides.apply(listed) else new Dynamic {})
+  let (required = d.paths.map((p) -> wrap.apply(nest(p, sample(leaf(c, p).type)))))
+  let (rule = "\(why): \(Model.conditionPhrase(d))")
+    List(
+      ok("\(rule); the requirements met", mergeAll(List(base, applies) + required)),
+      bad("\(rule); all of them missing", merge(base, applies)),
+      ok("\(rule); the rule not applying", merge(base, excused)),
+    )
+      + d.paths.mapIndexed((i, p) ->
+        bad(
+          "\(rule); `\(p.join("."))` missing",
+          mergeAll(List(base, applies) + required.take(i) + required.drop(i + 1)),
+        )
+      )
+      + (
+        if (other == null)
+          List()
+        else if (d.unless)
+          List(
+            bad(
+              "\(rule); the condition is \(other), the requirements missing",
+              merge(base, decides.apply(other)),
+            ),
+          )
+        else
+          List(
+            ok(
+              "\(rule); the condition is \(other), nothing required",
+              merge(base, decides.apply(other)),
+            ),
+          )
+      )
+
+/// A value of the condition's type that the rule does not list, or null.
+local function unlisted(n: Model.Node, listed: List<Any>): Any =
+  if (n.kind == "boolean")
+    if (listed.contains(true) && !listed.contains(false))
+      false
+    else if (listed.contains(false) && !listed.contains(true))
+      true
+    else
+      null
+  else
+    n.values.findOrNull((v) -> !listed.contains(v))
+
+/// Probes for every rule across fields of the module `root` and of the blocks
+/// directly below it, as whole documents. A document that carries each
+/// `@RequiredUnless` of the module's excuse is the base of every probe, so that
+/// the rule being probed is the only reason one is refused.
+function conditions(root: Model.Node): List<Probe> =
+  let (
+    base =
+      mergeAll(
+        root.cls.conditions
+          .filter((d) -> d.unless)
+          .map((d) -> nest(d.path, d.values.first)),
+      )
+  )
+    root.cls.conditions.flatMap((d) ->
+      // Its own excuse is not in the base: it is what the probe decides.
+      probesOfRule(
+        d,
+        root.cls,
+        List(),
+        mergeAll(
+          root.cls.conditions
+            .filter((o) -> o.unless && o != d)
+            .map((o) -> nest(o.path, o.values.first)),
+        ),
+        "module",
+      )
+    )
+      + root.cls.props
+        .filter((p) -> p.type.kind == "object")
+        .flatMap((p) ->
+          p.type.cls.conditions.flatMap((d) ->
+            probesOfRule(d, p.type.cls, List(p.name), base, "`\(p.name)`")
+          )
+        )

@@ -11,12 +11,15 @@ import "@model/Model.pkl"
 import "@python/Pydantic.pkl"
 import "@typescript/Zod.pkl"
 
+import "conformance/charts/CondChart.pkl"
 import "conformance/contract/Blocks.pkl"
+import "conformance/contract/Conditions.pkl"
 import "conformance/contract/Literals.pkl"
 import "conformance/contract/Names.pkl"
 import "conformance/union/Union.pkl"
+import "Showcase.pkl"
 
-local docs = Model.documents(List(Blocks, Literals, Names, Union))
+local docs = Model.documents(List(Blocks, Conditions, Literals, Names, Showcase, Union))
 local zod = Zod.render(docs)
 local py = Pydantic.render(docs)
 local reference = Docs.render(docs)
@@ -43,14 +46,14 @@ facts {
     zod.contains(#"  "service-lib": NonEmptyString,"#)
     zod.contains(#"  "max-size": PositiveInt.default(10),"#)
     zod.contains(#"  global: PositiveInt.optional(),"#)
-    zod.contains(#"o["the-mode"]"#)
+    zod.contains(#"at(o, ["the-mode"])"#)
     py.contains(#"service_lib: NonEmptyString = Field(alias="service-lib")"#)
     py.contains(#"global_: PositiveInt | None = Field(default=None, alias="global")"#)
     py.contains(#"class_: PositiveInt = Field(default=1, alias="class")"#)
     py.contains(#"f_hidden: NonEmptyString | None = Field(default=None, alias="_hidden")"#)
     py.contains(#"f_2fa: PositiveInt | None = Field(default=None, alias="2fa")"#)
     py.contains(#"max_size: PositiveInt = Field(default=10, alias="max-size")"#)
-    py.contains(#"self.the_mode in"#)
+    py.contains(#"_at(self, ["the_mode"]) in"#)
   }
   ["a map keyed by an enum is a partial record in zod, and its keys are named in the schema"] {
     zod.contains("z.partialRecord(LogLevel, PositiveInt)")
@@ -95,5 +98,72 @@ facts {
     reference.contains(#"`"left\|right `code`"`"#)
     Helm.readme(literals).contains(#"`"left\|right `code`"`"#)
     Helm.readme(literals).split("\n").filter((l) -> l.startsWith("| `multiline`")).length == 1
+  }
+  ["an exclusive bound is exclusive in every generator"] {
+    schema("showcase").properties["openRatio"].exclusiveMinimum == 0
+    schema("showcase").properties["openRatio"].maximum == 1
+    !schema("showcase").properties["openRatio"].toMap().containsKey("minimum")
+    schema("showcase").properties["halfOpen"].minimum == 0
+    schema("showcase").properties["halfOpen"].exclusiveMaximum == 1
+    zod.contains("openRatio: z.number().max(1).gt(0).optional()")
+    zod.contains("halfOpen: z.number().min(0).lt(1).optional()")
+    py.contains("openRatio: Annotated[float, Field(le=1, gt=0)] | None = None")
+    py.contains("halfOpen: Annotated[float, Field(ge=0, lt=1)] | None = None")
+    reference.contains("greater than 0 and at most 1")
+    reference.contains("at least 0 and less than 1")
+  }
+  ["denied keys are a propertyNames, a refine and a validator"] {
+    schema("showcase").properties["labels"].propertyNames
+      == (
+        new Dynamic {
+          not { `enum` = List("severity", "k8s_cluster_name") }
+        }
+      )
+    schema("showcase").properties["anyButKind"].propertyNames.not.`enum` == List("kind")
+    zod.contains(
+      #"labels: z.record(z.string(), NonEmptyString).refine((o) => !["severity", "k8s_cluster_name"].some"#,
+    )
+    py.contains(#"AfterValidator(_deny_keys(["severity", "k8s_cluster_name"]))"#)
+    reference.contains("never has the keys `severity`, `k8s_cluster_name`")
+  }
+  ["a rule across fields through blocks is an if with then or else over nested properties"] {
+    local rules = schema("conditions").allOf
+    rules.length == 2
+    // `when`: the condition needs every step to be there and the value to be listed.
+    rules.first.`if`.required == List("mode")
+    rules.first.then.properties["upstream"].required == List("url")
+    // `unless`: the requirements are in the `else`, which a document that never says reaches.
+    rules.last.`if`.properties["alerts"].properties["remote"].properties["enabled"].`enum`
+      == List(true)
+    rules.last.`if`.properties["alerts"].required == List("remote")
+    !rules.last.toMap().containsKey("then")
+    rules.last.`else`.required == List("database", "events", "archive")
+    // Paths that share a step share its `properties`, and each level requires what runs through it.
+    rules.last.`else`.properties["database"].required == List("host", "owner")
+    rules.last.`else`.properties["database"].properties["owner"].required
+      == List("passwordSecret")
+    // A rule on a class is in the schema of the property that holds it.
+    schema("conditions").properties["export"].allOf.length == 2
+  }
+  ["a rule across fields is a superRefine in zod and a model validator in pydantic"] {
+    zod.contains(#"(["primary"] as unknown[]).includes(at(o, ["mode"]))"#)
+    zod.contains(#"if (!([true] as unknown[]).includes(at(o, ["alerts", "remote", "enabled"])))"#)
+    zod.contains(#"for (const p of [["database", "host"], ["database", "owner", "passwordSecret"]"#)
+    zod.contains(
+      "export const ConditionsExport = z.strictObject(ConditionsExport_shape).superRefine(",
+    )
+    py.contains(#"if _at(self, ["alerts", "remote", "enabled"]) not in [True]:"#)
+    py.contains(#"if _at(self, ["mode"]) in ["primary"]:"#)
+    py.contains(#"def _conditional_ConditionsExport(self) -> "ConditionsExport":"#)
+    reference.contains("Rules across fields:")
+    reference.contains(
+      "- Unless `alerts.remote.enabled` is `true`, `database.host`, `database.owner.passwordSecret`, `events.url`, `archive.bucket.name` are required.",
+    )
+  }
+  ["a chart's values schema carries the rules of its module"] {
+    local chart = Model.chartOf(CondChart)!!
+    Helm.valuesSchema(chart).allOf.length == 2
+    Helm.valuesSchema(chart).allOf.first.`if`.required == List("phase")
+    Helm.valuesSchema(chart).allOf.last.`else`.properties["database"].required == List("host")
   }
 }

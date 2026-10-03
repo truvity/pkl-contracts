@@ -1,0 +1,6 @@
+alerts:
+  remote:
+    enabled: true
+mode: primary
+upstream:
+  url: https://up.example

@@ -17,6 +17,7 @@ bytes: V.Bytes?
 quantity: V.Quantity?
 bufferLimit: V.BufferLimit?
 duration: V.GoDuration?
+promDuration: V.PromDuration?
 nonEmptyString: V.NonEmptyString?
 url: V.Url?
 hostname: V.Hostname?
@@ -33,8 +34,11 @@ publicKey: V.PublicKey?
 urlPath: V.UrlPath?
 urlPathOrEmpty: V.UrlPathOrEmpty?
 dnsName: V.DnsName?
+dnsLabel: V.DnsLabel?
+statusCodeList: V.StatusCodeList?
 logLevel: V.LogLevel?
 tlsMode: V.TlsMode?
+gatewayTlsMode: V.GatewayTlsMode?
 cspMode: V.CspMode?
 pullPolicy: V.PullPolicy?
 otelProtocol: V.OtelProtocol?
@@ -71,3 +75,33 @@ cappedDnsName: V.DnsName?
 /// Two to four characters of anything.
 @A.Length { min = 2; max = 4 }
 shortString: String?
+
+// Exclusive bounds, alone and beside an inclusive one on the other end. A
+// ratio that may not be zero, a duration in seconds that must be positive, a
+// half-open interval.
+
+/// Greater than zero, at most one: the vocabulary's `Ratio` with its lower end
+/// made exclusive.
+@A.Range { exclusiveMin = 0 }
+openRatio: V.Ratio?
+/// Greater than zero, no upper end.
+@A.Range { exclusiveMin = 0 }
+positiveNumber: Number?
+/// Below one hundred, no lower end.
+@A.Range { exclusiveMax = 100 }
+belowHundred: Number?
+/// Zero up to, and not including, one.
+@A.Range { min = 0; exclusiveMax = 1 }
+halfOpen: Number?
+/// Whole numbers strictly between zero and ten.
+@A.Range { exclusiveMin = 0; exclusiveMax = 10 }
+betweenZeroAndTen: Int?
+
+// Maps and open objects that refuse some keys.
+
+/// Labels, but never `severity` or `k8s_cluster_name`.
+@A.DenyKeys { keys { "severity"; "k8s_cluster_name" } }
+labels: Mapping<String, V.NonEmptyString>?
+/// An open object that is never given a `kind`.
+@A.DenyKeys { keys { "kind" } }
+anyButKind: V.OpenObject?

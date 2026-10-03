@@ -1,0 +1,9 @@
+alerts:
+  remote:
+    enabled: true
+export:
+  target:
+    kind: s3
+    bucket: b
+  credentials:
+    secret: s

@@ -1,0 +1,5 @@
+alerts:
+  remote:
+    enabled: true
+mode: primary
+upstream: {}

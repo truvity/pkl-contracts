@@ -109,3 +109,206 @@ class Limits {
   /// Memory.
   memory: String = "1Gi"
 }
+
+/// A range that meets itself where one side is exclusive.
+class EmptyExclusive {
+  /// Greater than one and at most one: nothing.
+  @A.Range { exclusiveMin = 1; max = 1 }
+  ratio: Number
+}
+
+/// A range whose exclusive ends cross.
+class CrossedExclusive {
+  /// Greater than two and less than one: nothing.
+  @A.Range { exclusiveMin = 2; exclusiveMax = 1 }
+  ratio: Number
+}
+
+/// A range whose exclusive end tightens what the type allows.
+class TightenedExclusive {
+  /// `Ratio` is 0 to 1; the property makes the lower end exclusive.
+  @A.Range { exclusiveMin = 0 }
+  ratio: V.Ratio
+  /// Both spellings of one end: the exclusive one is the stricter.
+  @A.Range { min = 0; exclusiveMin = 0; max = 1; exclusiveMax = 2 }
+  both: Number
+}
+
+/// Deny keys on a string.
+class DenyOnString {
+  /// Wrong kind.
+  @A.DenyKeys { keys { "a" } }
+  name: String
+}
+
+/// A rule that names a property that is not there.
+@A.RequiredWhen {
+  property = "flag"
+  `in` { true }
+  require { "typo.value" }
+}
+class UnknownPath {
+  /// The flag.
+  flag: Boolean = false
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// A rule whose path runs through a value that is not a block.
+@A.RequiredWhen {
+  property = "flag"
+  `in` { true }
+  require { "value.inner" }
+}
+class ThroughScalar {
+  /// The flag.
+  flag: Boolean = false
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// A rule on a string, which is neither a boolean nor an enum.
+@A.RequiredWhen {
+  property = "name"
+  `in` { "a" }
+  require { "value" }
+}
+class ConditionOnString {
+  /// The name.
+  name: V.NonEmptyString = "x"
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// A rule that lists a mode the enum does not have.
+@A.RequiredWhen {
+  property = "mode"
+  `in` { "turbo" }
+  require { "value" }
+}
+class UnknownMember {
+  /// The mode.
+  mode: "slow" | "fast" = "slow"
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// A rule that lists a string for a boolean.
+@A.RequiredWhen {
+  property = "flag"
+  `in` { "yes" }
+  require { "value" }
+}
+class StringForBoolean {
+  /// The flag.
+  flag: Boolean = false
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// A rule whose condition defaults to a value that triggers it.
+@A.RequiredUnless {
+  property = "flag"
+  `in` { true }
+  require { "value" }
+}
+class DefaultInTheList {
+  /// The flag; on by default.
+  flag: Boolean = true
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// A rule that requires a property that has a default.
+@A.RequiredWhen {
+  property = "flag"
+  `in` { true }
+  require { "value" }
+}
+class RequiredWithDefault {
+  /// The flag.
+  flag: Boolean = false
+  /// The value, which is never absent.
+  value: V.NonEmptyString = "x"
+}
+
+/// A rule that requires a path through a block that has a default of its own.
+@A.RequiredWhen {
+  property = "flag"
+  `in` { true }
+  require { "inner.value" }
+}
+class ThroughDefaultedBlock {
+  /// The flag.
+  flag: Boolean = false
+  /// A block with a default of its own.
+  inner: Inner = new Inner { value = "x" }
+}
+
+/// A block.
+class Inner {
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// A rule that names nothing to require.
+@A.RequiredWhen {
+  property = "flag"
+  `in` { true }
+  require {}
+}
+class NothingRequired {
+  /// The flag.
+  flag: Boolean = false
+}
+
+/// A rule on an alias of something that is not a class.
+@A.RequiredWhen {
+  property = "flag"
+  `in` { true }
+  require { "value" }
+}
+typealias RuleOnAString = String
+
+/// A property of that alias.
+class RuleOnAliasOfString {
+  /// Wrong kind.
+  name: RuleOnAString
+}
+
+/// A rule that is sound, in every form: nested paths, shared prefixes, a
+/// boolean and an enum, the converse, on the class.
+@A.RequiredWhen {
+  property = "inner.mode"
+  `in` { "a"; "b" }
+  require { "inner.value"; "other.x"; "other.y" }
+}
+@A.RequiredUnless {
+  property = "flag"
+  `in` { true }
+  require { "inner.value" }
+}
+class Sound {
+  /// The flag.
+  flag: Boolean = false
+  /// A block.
+  inner: SoundInner?
+  /// Another.
+  other: SoundOther?
+}
+
+/// A block.
+class SoundInner {
+  /// The mode.
+  mode: "a" | "b" | "c" = "c"
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// A block.
+class SoundOther {
+  /// X.
+  x: V.NonEmptyString?
+  /// Y.
+  y: V.NonEmptyString?
+}

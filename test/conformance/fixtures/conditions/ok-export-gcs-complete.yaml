@@ -1,0 +1,9 @@
+alerts:
+  remote:
+    enabled: true
+export:
+  target:
+    kind: gcs
+    bucket: b
+  credentials:
+    secret: s

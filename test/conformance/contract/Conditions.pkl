@@ -1,0 +1,146 @@
+/// Rules across fields that run through blocks: a condition on a boolean or on
+/// an enum, at a dotted path that is in another class than the one the
+/// requirements are in, and requirements that are themselves nested paths. The
+/// rule written on the module is the shape of a chart's "required unless it is
+/// only rendering rules for another cluster"; the ones on a class are the same
+/// at a smaller scale.
+///
+/// Every validator must read both branches of each rule alike: where the
+/// condition holds, where it does not, and where the document never says (a
+/// block or a value is absent), which for `@RequiredUnless` means the
+/// requirements apply.
+@A.Schema { id = "https://example.com/schemas/conditions.json"; title = "conditions" }
+@A.RequiredUnless {
+  property = "alerts.remote.enabled"
+  `in` { true }
+  require {
+    "database.host"
+    "database.owner.passwordSecret"
+    "events.url"
+    "archive.bucket.name"
+  }
+}
+@A.RequiredWhen {
+  property = "mode"
+  `in` { "primary" }
+  require { "upstream.url" }
+}
+module conformance.contract.Conditions
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// Alerting. Absent is fine; where it says `remote.enabled`, the install is only
+/// rendering rules for another cluster and needs nothing else.
+alerts: Alerts?
+
+/// The database. Its host and the Secret of its owner are given by every install.
+database: Database
+
+/// The events server.
+events: Events
+
+/// Where the archive goes.
+archive: Archive
+
+/// What the instance does: a `primary` needs an upstream.
+mode: "standalone" | "primary" | "replica" = "standalone"
+
+/// The upstream a primary replicates from.
+upstream: Upstream?
+
+/// Exporting, a class with rules of its own.
+`export`: Export?
+
+/// Alerting.
+class Alerts {
+  /// Where the rules are evaluated.
+  remote: AlertsRemote?
+}
+
+/// Where the rules are evaluated.
+class AlertsRemote {
+  /// Whether the install renders rules only.
+  enabled: Boolean = false
+}
+
+/// The database.
+class Database {
+  /// The host.
+  host: V.NonEmptyString?
+  /// The database's name.
+  name: V.NonEmptyString = "app"
+  /// The owner role.
+  owner: DatabaseRole
+}
+
+/// A role and the Secret that holds its password.
+class DatabaseRole {
+  /// The role's name.
+  role: V.NonEmptyString = "owner"
+  /// The Secret that holds the password.
+  passwordSecret: V.NonEmptyString?
+}
+
+/// The events server.
+class Events {
+  /// Its URL.
+  url: V.NonEmptyString?
+}
+
+/// The archive.
+class Archive {
+  /// The bucket.
+  bucket: Bucket
+  /// What every key begins with.
+  prefix: V.NonEmptyString = "archive"
+}
+
+/// A bucket.
+class Bucket {
+  /// Its name.
+  name: V.NonEmptyString?
+}
+
+/// The upstream.
+class Upstream {
+  /// Its URL.
+  url: V.NonEmptyString?
+}
+
+/// Exporting what the service holds. A destination that is a bucket needs a
+/// bucket and credentials; an export that is switched on needs a sink.
+@A.RequiredWhen {
+  property = "target.kind"
+  `in` { "s3"; "gcs" }
+  require { "target.bucket"; "credentials.secret" }
+}
+@A.RequiredWhen {
+  property = "enabled"
+  `in` { true }
+  require { "sink" }
+}
+class Export {
+  /// Whether it runs.
+  enabled: Boolean = false
+  /// Where to.
+  target: ExportTarget?
+  /// How to authenticate.
+  credentials: ExportCredentials?
+  /// What it writes to.
+  sink: V.NonEmptyString?
+}
+
+/// A destination.
+class ExportTarget {
+  /// What kind it is.
+  kind: "none" | "s3" | "gcs" = "none"
+  /// The bucket, for a bucket.
+  bucket: V.NonEmptyString?
+}
+
+/// Credentials.
+class ExportCredentials {
+  /// The Secret that holds them.
+  secret: V.NonEmptyString?
+}

@@ -1,0 +1,3 @@
+alerts:
+  remote:
+    enabled: false

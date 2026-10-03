@@ -1,0 +1,9 @@
+database:
+  host: ''
+  owner:
+    passwordSecret: owner-pw
+events:
+  url: https://events.example
+archive:
+  bucket:
+    name: bkt

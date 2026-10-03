@@ -1,0 +1,4 @@
+alerts:
+  remote:
+    enabled: true
+export: {}

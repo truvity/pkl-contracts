@@ -83,6 +83,38 @@ facts {
     compatible(#"{"type":"integer","minimum":1}"#, #"{"type":"integer","minimum":0}"#)
     compatible(#"{"type":"integer","maximum":10}"#, #"{"type":"integer"}"#)
   }
+  ["an exclusive bound is a bound: tightened or added is breaking, relaxed or removed is not"] {
+    breaking(#"{"type":"number"}"#, #"{"type":"number","exclusiveMinimum":0}"#).length == 1
+    breaking(
+      #"{"type":"number","exclusiveMinimum":0}"#,
+      #"{"type":"number","exclusiveMinimum":1}"#,
+    ).length == 1
+    breaking(
+      #"{"type":"number","exclusiveMaximum":10}"#,
+      #"{"type":"number","exclusiveMaximum":9}"#,
+    ).length == 1
+    compatible(
+      #"{"type":"number","exclusiveMinimum":1}"#,
+      #"{"type":"number","exclusiveMinimum":0}"#,
+    )
+    compatible(#"{"type":"number","exclusiveMaximum":10}"#, #"{"type":"number"}"#)
+  }
+  ["refusing keys a map was free to have is breaking, allowing them again is not"] {
+    local denied = ##"{"type":"object","propertyNames":{"not":{"enum":["severity"]}}}"##
+    breaking(#"{"type":"object"}"#, denied)
+      == List("the keys were constrained (`propertyNames` was added)")
+    breaking(denied, ##"{"type":"object","propertyNames":{"not":{"enum":["severity","kind"]}}}"##)
+      .length
+      == 1
+    compatible(denied, #"{"type":"object"}"#)
+  }
+  ["a rule across fields that appears or changes is breaking"] {
+    local rule = (key: String) ->
+      ##"{"type":"object","allOf":[{"if":{"required":["a"]},"then":{"required":["\##(key)"]}}]}"##
+    breaking(#"{"type":"object"}"#, rule.apply("b")).length == 1
+    breaking(rule.apply("b"), rule.apply("c")).length == 1
+    changes(rule.apply("b"), rule.apply("b")).isEmpty
+  }
   ["a pattern added or changed is breaking, one removed is not"] {
     breaking(#"{"type":"string"}"#, #"{"type":"string","pattern":"^a"}"#).length == 1
     breaking(#"{"type":"string","pattern":"^a"}"#, #"{"type":"string","pattern":"^a$"}"#).length

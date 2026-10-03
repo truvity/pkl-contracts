@@ -1,0 +1,44 @@
+/// The values of a chart with rules across fields on its own module: what a chart
+/// needs only when it renders workloads (`database.host`), and what an `active` one
+/// needs. The chart's values schema must carry both, and the defaults must still
+/// satisfy them.
+@A.Chart { title = "cond chart values" }
+@A.RequiredWhen {
+  property = "phase"
+  `in` { "active" }
+  require { "upstream.url" }
+}
+@A.RequiredUnless {
+  property = "alerts.remote.enabled"
+  `in` { true }
+  require { "database.host" }
+}
+module conformance.charts.CondChart
+
+extends "@templates/ChartValues.pkl"
+
+import "@fragments/Platform.pkl"
+import "@vocab/Annotations.pkl" as A
+
+import "../contract/Conditions.pkl" as C
+
+/// Whether the instance is serving.
+phase: "passive" | "active" = "passive"
+
+/// Alerting; where it says `remote.enabled` nothing else is needed.
+alerts: C.Alerts?
+
+/// The database.
+database: C.Database
+
+/// The upstream a primary replicates from.
+upstream: C.Upstream?
+
+/// The one image this chart ships.
+images: Images
+
+/// The images of this chart, by component.
+class Images {
+  /// The service's image.
+  cond: Platform.PlatformImage
+}

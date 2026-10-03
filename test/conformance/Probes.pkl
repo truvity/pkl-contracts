@@ -10,6 +10,7 @@ import "@model/Model.pkl"
 
 import "../Probes.pkl"
 import "../Showcase.pkl"
+import "contract/Conditions.pkl"
 
 options: Options
 
@@ -27,6 +28,14 @@ output {
           value = new Dynamic { [prop] = pr.value }
           renderer = new JsonRenderer { omitNullProperties = false }
         }
+      }
+    }
+    // The rules across fields of the `conditions` contract are probed with whole
+    // documents, named for it: `<ok|bad>-conditions-<n>.json`.
+    for (i, pr in Probes.conditions(Model.moduleNode(Conditions))) {
+      ["\(options.dir)/\(pr.label)-conditions-\(i).json"] {
+        value = pr.value
+        renderer = new JsonRenderer { omitNullProperties = false }
       }
     }
   }

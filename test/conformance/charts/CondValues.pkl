@@ -1,0 +1,16 @@
+/// The `cond` chart's default values: a database host, so that a render of the
+/// workloads is complete, checked against the chart's rules when evaluated.
+amends "CondChart.pkl"
+
+config { probes { address = ":7070" } }
+
+database { host = "db.example" }
+
+images {
+  cond {
+    registry = "registry.example.com"
+    repository = "example/cond"
+    tag = ""
+    digest = ""
+  }
+}
