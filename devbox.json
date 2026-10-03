@@ -3,7 +3,6 @@
     "just": "1.58.0",
     "just-lsp": "0.6.2",
     "lefthook": "2.1.10",
-    "pkl-lsp": "0.8.0",
     "editorconfig-checker": "4.0.2",
     "jq": "1.8.1"
   },

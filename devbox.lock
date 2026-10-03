@@ -299,44 +299,6 @@
           "store_path": "/nix/store/yvngyq9r8vj9jb0rwvx74bdqy3gc7kqy-lefthook-2.1.10"
         }
       }
-    },
-    "pkl-lsp@0.8.0": {
-      "last_modified": "2026-09-29T03:29:29Z",
-      "resolved": "github:NixOS/nixpkgs/b6c8664de9b6cc07fe5666a29f91884ba81197c4#pkl-lsp",
-      "source": "devbox-search",
-      "version": "0.8.0",
-      "systems": {
-        "aarch64-darwin": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/552qw0mjbfzinkyb6lcx99vn2nj08v85-pkl-lsp-0.8.0",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/552qw0mjbfzinkyb6lcx99vn2nj08v85-pkl-lsp-0.8.0"
-        },
-        "aarch64-linux": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/05rdxj1ajd76ih7rhd4kwziss2gv48qx-pkl-lsp-0.8.0",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/05rdxj1ajd76ih7rhd4kwziss2gv48qx-pkl-lsp-0.8.0"
-        },
-        "x86_64-linux": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/n4dzyixlpc7rnb57ybillwrnj3617zh2-pkl-lsp-0.8.0",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/n4dzyixlpc7rnb57ybillwrnj3617zh2-pkl-lsp-0.8.0"
-        }
-      }
     }
   }
 }
