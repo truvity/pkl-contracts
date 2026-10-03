@@ -7,6 +7,16 @@ under one version, so a heading covers all of them.
 
 ## Unreleased
 
+### Fixes
+
+- **Generated JSON Schemas and chart values schemas now carry property
+  defaults.** `contracts.jsonschema` dropped `default` (the zod, pydantic and
+  documentation outputs already had it), so a schema accepted the same documents
+  but told an editor, a form or a reader nothing of the default. Regenerate to
+  pick it up; no document that was valid becomes invalid. The worked example's
+  generation now checks, beyond the verdicts, that every default is present and
+  equal in the schemas, `values.yaml`, zod, pydantic and the docs table.
+
 ### Tooling
 
 - The root devbox no longer installs Go, Node, uv, a JDK or Gradle. They moved to

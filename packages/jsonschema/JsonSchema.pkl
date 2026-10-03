@@ -93,7 +93,7 @@ local function body(n: Model.Node): Dynamic =
 
 local function propSchema(p: Model.Prop): Dynamic = (ofNode(p.type)) {
   when (p.doc != null) { description = p.doc }
-  when (p.hasDefault) { default = p.default }
+  when (p.hasDefault) { ["default"] = p.default }
 }
 
 /// The `type: object` part of a class: its properties, which are required,

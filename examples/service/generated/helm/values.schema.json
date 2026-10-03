@@ -533,7 +533,8 @@
         "maxConnections": {
           "type": "integer",
           "minimum": 1,
-          "description": "Pool size for this instance. Sized against the server's limit divided by the number of instances, not guessed."
+          "description": "Pool size for this instance. Sized against the server's limit divided by the number of instances, not guessed.",
+          "default": 10
         }
       }
     },
@@ -594,7 +595,8 @@
             "warn",
             "error"
           ],
-          "description": "The lowest level that is written."
+          "description": "The lowest level that is written.",
+          "default": "info"
         }
       }
     },
@@ -608,7 +610,8 @@
         "seconds": {
           "type": "integer",
           "minimum": 1,
-          "description": "Seconds to finish in-flight work. Unset means the service's own default, which is only correct if nothing external is counting."
+          "description": "Seconds to finish in-flight work. Unset means the service's own default, which is only correct if nothing external is counting.",
+          "default": 20
         }
       }
     }
