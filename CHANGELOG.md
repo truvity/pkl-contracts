@@ -7,6 +7,8 @@ under one version, so a heading covers all of them.
 
 ## Unreleased
 
+## v0.3.0 — 2026-10-03
+
 This is a minor release (0.2.x to 0.3.0): it changes the vocabulary's patterns,
 adds annotations and aliases, and moves one class. What it narrows is listed
 first.
