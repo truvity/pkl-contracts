@@ -29,6 +29,7 @@ rm -rf gen
   --mapping conformance.contract.Migrate=$pkg/migrate \
   --mapping conformance.contract.LogArchiver=$pkg/logarchiver \
   --mapping conformance.contract.Shortener=$pkg/shortener \
+  --mapping conformance.contract.Installed=$pkg/installed \
   "$base/contracts.vocab@$version#/Vocab.pkl" \
   "$base/contracts.fragments@$version#/Fragments.pkl" \
   "$base/contracts.fragments@$version#/Platform.pkl" \

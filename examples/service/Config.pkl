@@ -8,9 +8,41 @@ extends "@templates/ServiceConfig.pkl"
 
 import "@fragments/Fragments.pkl" as F
 import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
 
 /// The listener the service's own traffic is served on.
 listen: F.Listen
 
 /// The database the service keeps its records in.
 postgres: F.Postgres
+
+/// How long what the service keeps is kept. A default that is a class, which
+/// differs from the class's own in `days`.
+retention: Retention = new Retention { days = 30 }
+
+/// Labels put on what the service writes. A default that is an open object.
+labels: V.OpenObject = new Dynamic { team = "platform" }
+
+/// Where the service archives what it served. Absent means it does not.
+archive: Archive?
+
+/// How long what the service keeps is kept.
+class Retention {
+  /// Days before it is deleted.
+  days: V.PositiveInt = 7
+  /// Keep it until somebody deletes it, whatever `days` says.
+  keepForever: Boolean = false
+}
+
+/// Where the service archives what it served.
+class Archive {
+  /// The bucket. Every install names its own, so the defaults leave it out and the
+  /// schema requires it.
+  @A.SetAtInstall
+  bucket: V.NonEmptyString?
+  /// What every object's key begins with.
+  prefix: V.NonEmptyString = "echo/requests"
+  /// How often a batch is written, in seconds: not more often than every ten.
+  @A.Range { min = 10 }
+  batchSeconds: V.PositiveInt = 60
+}

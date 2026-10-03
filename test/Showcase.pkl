@@ -14,6 +14,8 @@ ratio: V.Ratio?
 positiveInt: V.PositiveInt?
 nonNegativeInt: V.NonNegativeInt?
 bytes: V.Bytes?
+quantity: V.Quantity?
+bufferLimit: V.BufferLimit?
 duration: V.GoDuration?
 nonEmptyString: V.NonEmptyString?
 url: V.Url?
@@ -39,3 +41,33 @@ otelProtocol: V.OtelProtocol?
 openObject: V.OpenObject?
 named: V.Named?
 mounted: V.Mounted?
+
+// Properties that narrow a type with their own bound (`@A.Range`, `@A.Length`),
+// as a contract does where a field's rule is not worth an alias. The bound is the
+// intersection of the type's and the property's, and `Check.pkl` makes Pkl
+// enforce it; the probes run the same boundaries as for an alias.
+
+/// At least ten minutes, in seconds.
+@A.Range { min = 600 }
+atLeastTenMinutes: V.PositiveInt?
+/// At least two minutes, in seconds.
+@A.Range { min = 120 }
+atLeastTwoMinutes: V.PositiveInt?
+/// A port, zero meaning "any free one".
+@A.Range { max = 65535 }
+portOrZero: V.NonNegativeInt?
+/// A bound on both sides, on a plain `Int`.
+@A.Range { min = -5; max = 5 }
+smallInt: Int?
+/// A bound on a plain `Number`.
+@A.Range { min = 0.5; max = 2.5 }
+smallNumber: Number?
+/// A secret at least sixteen characters long.
+@A.Length { min = 16 }
+longEnough: V.NonEmptyString?
+/// A name that is at most 253 characters, which a Kubernetes name is.
+@A.Length { max = 253 }
+cappedDnsName: V.DnsName?
+/// Two to four characters of anything.
+@A.Length { min = 2; max = 4 }
+shortString: String?

@@ -63,7 +63,14 @@
 | `config.postgres.url` | PostgresUrl |  | **Required.** A connection URL without credentials, for example postgres://user@host:5432/dbname?sslmode=require. |
 | `config.postgres.passwordEnv` | NonEmptyString |  | The NAME of the environment variable holding the password. Unset means the connection needs none. |
 | `config.postgres.maxConnections` | PositiveInt | `10` | Pool size for this instance. Sized against the server's limit divided by the number of instances, not guessed. |
+| `config.retention.days` | PositiveInt | `7` | Days before it is deleted. |
+| `config.retention.keepForever` | boolean | `false` | Keep it until somebody deletes it, whatever `days` says. |
+| `config.labels` | OpenObject | `{"team": "platform"}` | Labels put on what the service writes. A default that is an open object. |
+| `config.archive.bucket` | NonEmptyString |  | **Set at install.** The bucket. Every install names its own, so the defaults leave it out and the schema requires it. |
+| `config.archive.prefix` | NonEmptyString | `"echo/requests"` | What every object's key begins with. |
+| `config.archive.batchSeconds` | PositiveInt | `60` | How often a batch is written, in seconds: not more often than every ten. |
 | `images.echo.registry` | string |  | The registry host. Left out, the repository is read as the whole name. |
 | `images.echo.repository` | NonEmptyString |  | **Required.** The repository path, without the registry and without a tag. |
 | `images.echo.tag` | string |  | The tag. Empty or absent when there is a digest. |
 | `images.echo.digest` | ImageDigest |  | The content digest, `sha256:` and 64 hex digits; empty when there is none. |
+| `resources` | OpenObject | `{"requests": {"cpu": "50m", "memory": "64Mi"}}` | What the pod asks Kubernetes for, in Kubernetes' own shape. A default that is an object: `values.yaml` carries it. |

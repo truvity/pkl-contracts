@@ -7,6 +7,8 @@ amends "Chart.pkl"
 config {
   listen { address = ":8080" }
   probes { address = ":7070" }
+  // Present, so that the defaults show the object's own: the bucket is left out.
+  archive {}
   postgres { url = "postgres://echo@db.example.com:5432/echo?sslmode=require" }
 }
 

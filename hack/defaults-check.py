@@ -17,6 +17,16 @@ carry exactly those defaults:
   - pydantic                                (`Field(default=...)`)
   - the docs table                          (the Default column)
 
+A default may be any value, an object included (an open object, or a class
+given a default of its own): each artifact must carry it whole.
+
+The same artifacts are checked for what a property that is SET AT INSTALL
+(`@SetAtInstall`) must look like: required by every schema and validator
+(a JSON Schema `required`, a zod field and a pydantic one without `optional`,
+`None` or a default, a docs row that says required and "Set at install"), and
+absent from values.yaml, where its object is present. A default for it would
+let an install that forgot it pass.
+
 It fails on a missing default, a different one, and one nobody declared. The
 directory defaults to examples/service/generated.
 """
@@ -133,7 +143,9 @@ for e in expected["chart"]:
 
 ts = next((gen / "ts").glob("*.ts")).read_text()
 zod = {}
+zod_lines = {}
 for m in re.finditer(r"^export const (\w+)_shape = \{\n(.*?)^\};", ts, re.S | re.M):
+    zod_lines[m.group(1)] = {f.group(1): f.group(0) for f in re.finditer(r"^  (\w+): .*$", m.group(2), re.M)}
     zod[m.group(1)] = {
         f.group(1): json.loads(f.group(2))
         for f in re.finditer(r"^  (\w+): .*\.default\((.*)\),$", m.group(2), re.M)
@@ -143,10 +155,18 @@ for m in re.finditer(r"^export const (\w+)_shape = \{\n(.*?)^\};", ts, re.S | re
 
 py = next((gen / "py").glob("*.py")).read_text()
 pyd = {}
-for m in re.finditer(r"^class (\w+)\(.*?\):\n(.*?)(?=^\S)", py + "\nEOF", re.S | re.M):
+pyd_lines = {}
+# A class ends at the next class or module-level name, not at any line that starts
+# in column 0: a multi-line docstring has such lines.
+for m in re.finditer(r"^class (\w+)\(.*?\):\n(.*?)(?=^(?:class |SCHEMAS|EOF|\w+ = ))", py + "\nEOF", re.S | re.M):
+    pyd_lines[m.group(1)] = {f.group(1): f.group(0) for f in re.finditer(r"^    (\w+): .*$", m.group(2), re.M)}
+    # A default is `Field(default=<literal>)`; a class's is built through the class,
+    # `Field(default_factory=lambda: <Class>.model_validate(<literal>))`.
     pyd[m.group(1)] = {
-        f.group(1): ast.literal_eval(f.group(2))
-        for f in re.finditer(r"^    (\w+): .* = Field\(default=(.*)\)$", m.group(2), re.M)
+        f.group(1): ast.literal_eval(f.group(2) or f.group(3))
+        for f in re.finditer(
+            r"^    (\w+): .* = Field\((?:default=(.*)|default_factory=lambda: \w+\.model_validate\((.*)\))\)$",
+            m.group(2), re.M)
     }
 
 # ---- docs table -------------------------------------------------------------
@@ -166,6 +186,46 @@ for qname, want in expected["classes"].items():
     compare(f"zod {qname}", want, zod.get(qname, {}))
     compare(f"pydantic {qname}", want, pyd.get(qname, {}))
     compare(f"docs table {qname}", want, docs.get(qname, {}))
+
+# ---- set at install ---------------------------------------------------------
+
+def schema_at(root: dict, defs: dict, path: str):
+    """The property schema at a dotted path, and the schema that holds it."""
+    holder, node = None, root
+    for part in path.split("."):
+        while isinstance(node, dict) and "$ref" in node:
+            node = defs[node["$ref"]]
+        holder, node = node, node["properties"][part]
+    return holder, node
+
+
+for path in expected["chartAtInstall"]:
+    checked += 1
+    *parents, leaf = path.split(".")
+    holder, prop = schema_at({k: v for k, v in values_schema.items() if k != "$defs"}, values_schema["$defs"], path)
+    if leaf not in holder.get("required", []):
+        problems.append(f"helm/values.schema.json: `{path}` is set at install and must be in `required`")
+    if "default" in prop:
+        problems.append(f"helm/values.schema.json: `{path}` is set at install and must have no default")
+    cur = values
+    for p in parents:
+        cur = cur.get(p) if isinstance(cur, dict) else None
+    if isinstance(cur, dict) and leaf in cur:
+        problems.append(f"helm/values.yaml: `{path}` is set at install and must be left out, it is {canon(cur[leaf])}")
+
+for qname, names in expected["classesAtInstall"].items():
+    for name in names:
+        checked += 1
+        where = f"`{qname}.{name}`"
+        z = zod_lines.get(qname, {}).get(name)
+        if z is None or ".optional()" in z or ".default(" in z:
+            problems.append(f"zod: {where} is set at install and must be required: {z}")
+        y = pyd_lines.get(qname, {}).get(name)
+        if y is None or "None" in y or "Field(" in y:
+            problems.append(f"pydantic: {where} is set at install and must be required: {y}")
+        rows = [r for r in re.findall(rf"^\| `{name}` \|.*$", next(iter(re.findall(rf"^### `{qname}`\n(.*?)(?=^#|\Z)", md, re.S | re.M)), ""), re.M)]
+        if not rows or "| yes |" not in rows[0] or "Set at install" not in rows[0]:
+            problems.append(f"docs table: {where} is set at install and its row must say so: {rows[:1]}")
 
 if checked == 0:
     problems.append("no default was checked: the contract declares none, or the check reads nothing")

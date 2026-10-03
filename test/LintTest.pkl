@@ -18,10 +18,15 @@ import "pkl:reflect"
 
 import "@fragments/Fragments.pkl"
 import "@fragments/Platform.pkl"
+import "@model/Model.pkl"
 import "@templates/ChartValues.pkl"
 import "@templates/ServiceConfig.pkl"
 import "@vocab/Annotations.pkl"
+import "@vocab/Check.pkl"
 import "@vocab/Vocab.pkl"
+
+import "LintFixtures.pkl"
+import "Showcase.pkl"
 
 /// Every module of the packages. The list is the module graph, because
 /// `pkl:reflect` cannot enumerate one; the first fact refuses a module that is
@@ -30,6 +35,7 @@ local modules: Map<String, reflect.Module> =
   Map(
     "Annotations.pkl", reflect.Module(Annotations),
     "Vocab.pkl", reflect.Module(Vocab),
+    "Check.pkl", reflect.Module(Check),
     "Fragments.pkl", reflect.Module(Fragments),
     "Platform.pkl", reflect.Module(Platform),
     "ServiceConfig.pkl", reflect.Module(ServiceConfig),
@@ -107,4 +113,115 @@ facts {
   ["every declaration is documented and no nullable field has a default"] {
     problems.isEmpty || throw("\n" + problems.join("\n"))
   }
+
+  ["no module of the packages has a literal union used in two places, or a union with a nullable member"] {
+    // `documents` refuses both (the second where it reflects a property), and
+    // is what every generator starts from.
+    Model.documents(List(Fragments, Platform, ServiceConfig, ChartValues, Showcase)).toMap().length
+      > 0
+    Model.chartOf(ChartValues) == null
+  }
+  ["a literal union in two places is found, and one in a single place is not"] {
+    local classes =
+      List("FirstUse", "SecondUse", "OnlyUse").map((c) -> Model.declNode(LintFixtures, c))
+    let (ps = Model.inlineEnumProblems(classes))
+      ps.length == 1
+        && ps.first.contains("FirstUse.mode")
+        && ps.first.contains("SecondUse.pace")
+        && !ps.first.contains("OnlyUse")
+    Model.inlineEnumProblems(List(Model.declNode(LintFixtures, "OnlyUse"))).isEmpty
+  }
+  ["`X | Y?` is refused, `(X | Y)?` is not"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "Trap").cls.props.length)
+      .contains("write `(X | Y)?`")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "TrapViaAlias").cls.props.length)
+      .contains("TrapAlias")
+    Model.declNode(LintFixtures, "NoTrap").cls.props.first.required == false
+  }
+  ["set at install: nullable, a non-empty string, never defaulted; and then required"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "InstallNotNullable").cls.props.length)
+      .contains("nullable type")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "InstallMayBeEmpty").cls.props.length)
+      .contains("non-empty")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "InstallWithDefault").cls.props.length)
+      .contains("contradict")
+    Model.declNode(LintFixtures, "Defaults").cls.props.first.required
+    Model.declNode(LintFixtures, "Defaults").cls.props.first.setAtInstall
+  }
+  ["a property's own bound needs a number for @Range, a string for @Length, and leaves a value"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "RangeOnString").cls.props.length)
+      .contains("@Range is for a number")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "LengthOnNumber").cls.props.length)
+      .contains("@Length is for a string")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "EmptyBound").cls.props.first.type.range)
+      .contains("leave no value")
+  }
+  ["an object's default is the property's own only when it differs from the class's"] {
+    local props = Model.declNode(LintFixtures, "Defaults").cls.props
+    props.find((p) -> p.name == "resources").hasDefault
+    props.find((p) -> p.name == "resources").default == Map("requests", Map("cpu", "50m"))
+    !props.find((p) -> p.name == "resources").required
+    !props.find((p) -> p.name == "extra").hasDefault
+    props.find((p) -> p.name == "extra").required
+    props.find((p) -> p.name == "limits").hasDefault
+    props.find((p) -> p.name == "limits").default == Map("cpu", "2", "memory", "1Gi")
+    !props.find((p) -> p.name == "plain").hasDefault
+    props.find((p) -> p.name == "plain").required
+  }
+  ["the line breaks the vocabulary refuses and the ones the generators guard are the same"] {
+    Vocab.lineBreaks == Model.lineBreaks
+    Model.lineBreaks.length == 7
+    Model.lineBreaks.every((b) -> b.contains(Regex(Model.lineBreakClass)))
+    !"x- _".contains(Regex(Model.lineBreakClass))
+  }
+  ["a pattern spells no `.`, `\\s`, `\\d`, `\\w` or `\\b`: every engine must read it alike"] {
+    local patterns =
+      reflect
+        .Module(Vocab)
+        .typeAliases
+        .toMap()
+        .mapValues((_, a) ->
+          a.annotations.findOrNull((x) -> reflect.Class(x.getClass()).name == "Pattern")
+        )
+        .filter((_, a) -> a != null)
+        .mapValues((_, a) -> (a as Annotations.Pattern).regex)
+    patterns.length > 10
+    patterns.every((name, re) ->
+      portable(re) || throw("`\(name)`: \(re) uses a construct the engines read differently")
+    )
+  }
+  ["a property's bound is enforced by Pkl, with the path and the bound in the message"] {
+    local msg = module.catch(() -> Check.checked((Showcase) { atLeastTenMinutes = 599 }))
+    msg.contains("atLeastTenMinutes") && msg.contains("599") && msg.contains("600")
+    Check.problems((Showcase) { atLeastTenMinutes = 600; longEnough = "x".repeat(16) }).isEmpty
+    Check.problems((Showcase) { longEnough = "short" }).length == 1
+  }
 }
+
+/// Whether the regular expression spells no construct that ECMAScript, RE2,
+/// Python and Java read differently: a `.` outside a class, or one of the
+/// class escapes `\s \S \d \D \w \W \b \B` (all Unicode-aware in some engines and ASCII
+/// in others). Escapes of one character (`\.`, `\t`, `\/`) are fine.
+local function portable(re: String): Boolean = scan(re.chars, false)
+
+local function scan(cs: List<String>, inClass: Boolean): Boolean =
+  if (cs.isEmpty)
+    true
+  else if (cs.first == "\\")
+    cs.length > 1 && !"sSdDwWbB".contains(cs[1]) && scan(cs.drop(2), inClass)
+  else if (cs.first == "[" && !inClass)
+    scan(cs.drop(1), true)
+  else if (cs.first == "]" && inClass)
+    scan(cs.drop(1), false)
+  else if (cs.first == "." && !inClass)
+    false
+  else
+    scan(cs.drop(1), inClass)

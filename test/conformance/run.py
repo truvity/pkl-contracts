@@ -5,7 +5,10 @@
 
 Every validator must give the same verdict on every fixture, and that verdict
 must be the fixture's label (`ok-*` accepted, `bad-*` refused). A split between
-two validators, or a unanimous verdict against the label, fails the run.
+two validators, or a unanimous verdict against the label, fails the run. There
+is no informational tier: where the engines disagreed (a line break that is not
+a newline, white space beyond ASCII), the vocabulary was changed until they
+agreed, and the case stayed as a fixture.
 
 The validators:
 
@@ -71,6 +74,11 @@ def generate():
     pkl_run("generate zod", "@typescript/Generate.pkl", "--dir", ZOD_DIR, *modules)
     pkl_run("generate pydantic", "@python/Generate.pkl", "--dir", PY_DIR, *modules)
     pkl_run("generate probes", str(CONF / "Probes.pkl"), "--dir", WORK / "probes")
+    # Pkl writes U+0085 (NEL) raw, and a YAML 1.1 reader (PyYAML, Go's) folds one
+    # inside a quoted scalar into a space, so the probe would reach those
+    # validators changed. Escaped, every reader gets the character.
+    for p in (WORK / "probes").glob("*.json"):
+        p.write_text(p.read_text(encoding="utf-8").replace("\u0085", "\\u0085"), encoding="utf-8")
     for name, values in CHARTS.items():
         pkl_run("generate helm", "@helm/Generate.pkl", "--dir", HELM / name, CONF / "charts" / f"{values}.pkl")
     sh("generate go", [CONF / "go" / "generate.sh"])
@@ -85,10 +93,10 @@ def manifest():
 
     for p in sorted((CONF / "fixtures").glob("*/*.yaml")):
         doc(f"fixture/{p.parent.name}/{p.stem}", p.parent.name, p, p.stem.split("-")[0])
-    # Strings the engines disagree on beyond the newline rule: reported, never failed.
-    for p in sorted((CONF / "edge").glob("*.yaml")):
-        doc(f"edge/{p.stem}", "showcase", p, "edge")
-        entries[-1]["informational"] = True
+    # `edge/` held the strings the engines still split on beyond a newline (a
+    # carriage return, NEL, LS, a vertical tab, a no-break space), reported and
+    # never failed. Each is now a fixture of the `showcase` document, refused by
+    # every engine like any other; a new finding of this kind is a fixture too.
     for p in sorted((WORK / "probes").glob("*.json")):
         doc(f"probe/{p.stem}", "showcase", p, p.stem.split("-")[0])
     # A chart's generated values must satisfy its generated values schema, which
@@ -109,7 +117,9 @@ def manifest():
 
 
 def lines(r, what):
-    return [json.loads(line) for line in r.stdout.splitlines() if line.startswith("{")]
+    # Split on "\n" alone: a validator's message may carry a raw NEL, LS or PS (the
+    # very characters under test), which `splitlines()` would cut a line at.
+    return [json.loads(line) for line in r.stdout.split("\n") if line.startswith("{")]
 
 
 def run_validators(kotlin):
@@ -135,7 +145,7 @@ def report(entries, results, kotlin):
     by = {}
     for r in results:
         by.setdefault(r["id"], {})[r["validator"]] = r
-    rows, split, against, edge = [], [], [], []
+    rows, split, against = [], [], []
     for e in entries:
         v = by.get(e["id"], {})
         mark = {c: ("A" if v[c]["accept"] else "R") for c in cols if c in v}
@@ -143,9 +153,6 @@ def report(entries, results, kotlin):
         missing = [c for c in cols if c not in v and (e["typed"] or c in SCHEMA_ONLY) and not (c == "kotlin" and e["schema"] == "platform")]
         verdicts = set(mark.values())
         agree = len(verdicts) == 1 and not missing
-        if e.get("informational"):
-            edge.append((e, mark))
-            continue
         if not agree:
             split.append((e, mark, v, missing))
         elif (verdicts == {"A"}) != (e["label"] == "ok"):
@@ -156,12 +163,8 @@ def report(entries, results, kotlin):
             f"{sum(1 for e, _, _ in rows if e['id'].startswith('probe/'))} probes, "
             f"{sum(1 for e, _, _ in rows if e['id'].startswith('chart/'))} chart values) x {len(cols)} validators ({', '.join(cols)})",
             f"  unanimous: {n - len(split)} of {n}; split: {len(split)}; unanimous against the label: {len(against)}",
-            f"  engine edges beyond the newline rule (informational, not failing): {sum(1 for _, m in edge if len(set(m.values())) > 1)} of {len(edge)} split"]
+            f"  engine edges beyond the line-break rule: {len(split)} (every one is a fixture, and a split fails the run)"]
     detail = []
-    for e, mark in edge:
-        acc = [c for c in mark if mark[c] == "A"]
-        detail.append(f"EDGE {e['id']}: accepted by {', '.join(acc) or '-'}; rejected by {', '.join(c for c in mark if mark[c] == 'R') or '-'}"
-                      + ("" if 0 < len(acc) < len(mark) else " (unanimous)"))
     for e, mark, v, missing in split:
         acc = [c for c in mark if mark[c] == "A"]
         rej = [c for c in mark if mark[c] == "R"]

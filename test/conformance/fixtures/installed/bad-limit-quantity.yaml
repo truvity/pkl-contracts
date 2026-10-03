@@ -1,0 +1,3 @@
+probes: { address: ":7070" }
+store: { bucket: "b" }
+limits: { cpu: "two" }

@@ -7,6 +7,7 @@ extends "@templates/ChartValues.pkl"
 
 import "@fragments/Platform.pkl"
 import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
 
 import "Config.pkl"
 
@@ -15,6 +16,10 @@ config: Config
 
 /// The one image this chart ships.
 images: Images
+
+/// What the pod asks Kubernetes for, in Kubernetes' own shape. A default that is
+/// an object: `values.yaml` carries it.
+resources: V.OpenObject = new Dynamic { requests { cpu = "50m"; memory = "64Mi" } }
 
 /// The images of this chart, by component.
 class Images {

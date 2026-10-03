@@ -14,8 +14,17 @@
 #   2. The vocabulary spells every pattern one way: through `search`, which
 #      has search semantics and refuses a newline; never `matches`, which is a
 #      full match. Each pattern alias is annotated with the same constant.
+#      A property MAY carry `@A.Range` and `@A.Length` (a bound narrowing the type
+#      it has; `contracts.vocab.Check` makes Pkl enforce it, and the generators
+#      read it like an alias's), because those are a fixed set of data, not an
+#      expression. `@A.Pattern` is the vocabulary's alone: a pattern is a regular
+#      expression, and a regular expression is an ad-hoc constraint.
 #   3. No `null` in a contract: an optional field is absent, not null.
-#   4. One version. A tag-shaped string appears in packages/Release.pkl and
+#   4. No `X | Y?`: the `?` binds to `Y` alone, so the union is not "nullable X
+#      or Y" but a nullable member, which every reflection reads as a REQUIRED
+#      field. Write `(X | Y)?`. (The model refuses it too, by reflection, for a
+#      generator; this catches it in the source, before one runs.)
+#   5. One version. A tag-shaped string appears in packages/Release.pkl and
 #      nowhere else a human writes it.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -91,13 +100,46 @@ awk '
 
 # 3. null -------------------------------------------------------------------
 for f in "${pkl[@]}"; do
-  case "$f" in test/*) continue ;; esac
+  case "$f" in
+    test/*) continue ;;
+    # The model is the intermediate form, where "absent" is a null, and the
+    # generators write other languages; neither is a contract.
+    packages/model/*) continue ;;
+  esac
   while IFS= read -r hit; do
     say "$f:${hit%%:*}: null in a contract: an optional field is absent, never null"
   done < <(code "$f" | grep -E '(^|[^!=<>])=[[:space:]]*null\b|\?\?[[:space:]]*null\b' || true)
 done
 
-# 4. one version ------------------------------------------------------------
+# 4. the `X | Y?` trap -----------------------------------------------------
+for f in "${pkl[@]}"; do
+  case "$f" in
+    packages/model/* | packages/jsonschema/* | packages/helm/* | packages/typescript/* | packages/python/* | packages/docs/*) continue ;;
+    packages/Release.pkl | */PklProject | test/LintFixtures.pkl) continue ;;
+  esac
+  while IFS= read -r hit; do
+    say "$f:${hit%%:*}: a union with a nullable member makes only that member nullable; write (X | Y)? : ${hit#*:}"
+  done < <(code "$f" | awk -F: '
+    { n=$1; s=substr($0, length($1)+2)
+      if (s ~ /^[[:space:]]*(class|function|import|local|amends|extends|module|open|when|for)[[:space:]]/) next
+      if (s ~ /^[[:space:]]*typealias[[:space:]]/) { i=index(s, "="); if (i == 0) next; t=substr(s, i+1) }
+      else { i=index(s, ":"); if (i == 0) next; t=substr(s, i+1); j=index(t, "="); if (j > 0) t=substr(t, 1, j-1) }
+      if (t ~ /\|[[:space:]]*[A-Za-z0-9_.">`]+\?/) print n ":" s
+    }')
+done
+
+# 4b. a pattern is the vocabulary's alone ------------------------------------
+for f in "${pkl[@]}"; do
+  case "$f" in
+    packages/vocab/* | packages/model/* | packages/jsonschema/* | packages/helm/* | packages/typescript/* | packages/python/* | packages/docs/*) continue ;;
+    test/*) continue ;;
+  esac
+  while IFS= read -r hit; do
+    say "$f:${hit%%:*}: @A.Pattern outside the vocabulary: a pattern is an ad-hoc constraint, add an alias to Vocab.pkl: ${hit#*:}"
+  done < <(code "$f" | grep -E '@(A\.)?Pattern\b' || true)
+done
+
+# 5. one version ------------------------------------------------------------
 for f in "${pkl[@]}"; do
   [ "$f" = packages/Release.pkl ] && continue
   while IFS= read -r hit; do

@@ -1,0 +1,111 @@
+/// Shapes that break the authoring rules, so that `LintTest.pkl` can show each
+/// rule is enforced: the lint is only as good as its refusal of what it refuses.
+/// Never a contract, and never generated.
+module contracts.test.LintFixtures
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// A literal union, used here...
+class FirstUse {
+  /// The mode.
+  mode: "fast" | "slow"
+}
+
+/// ...and overlapping here, in another place.
+class SecondUse {
+  /// The pace.
+  pace: "slow" | "steady"
+}
+
+/// A union used in one place only, which is allowed inline.
+class OnlyUse {
+  /// The shade.
+  shade: "light" | "dark"
+}
+
+/// `X | Y?` makes only `Y` nullable.
+class Trap {
+  /// The trap.
+  size: Int | String?
+}
+
+/// The same union, parenthesised.
+class NoTrap {
+  /// Nullable as a whole.
+  size: (Int | String)?
+}
+
+/// A nullable member inside an alias.
+typealias TrapAlias = Int | String?
+
+/// A property that uses it.
+class TrapViaAlias {
+  /// The trap.
+  size: TrapAlias
+}
+
+/// Set at install, but not nullable.
+class InstallNotNullable {
+  /// Required.
+  @A.SetAtInstall
+  bucket: V.NonEmptyString
+}
+
+/// Set at install, but a string that may be empty.
+class InstallMayBeEmpty {
+  /// Required.
+  @A.SetAtInstall
+  bucket: String?
+}
+
+/// Set at install, and defaulted.
+class InstallWithDefault {
+  /// Contradiction.
+  @A.SetAtInstall
+  bucket: V.NonEmptyString? = "x"
+}
+
+/// A range on a string.
+class RangeOnString {
+  /// Wrong kind.
+  @A.Range { min = 1 }
+  name: String
+}
+
+/// A length on a number.
+class LengthOnNumber {
+  /// Wrong kind.
+  @A.Length { min = 1 }
+  count: Int
+}
+
+/// A bound that leaves no value.
+class EmptyBound {
+  /// The type allows 1 to 65535; the property asks for 70000 and up.
+  @A.Range { min = 70000 }
+  port: V.Port
+}
+
+/// What a set-at-install property and the defaults of objects look like.
+class Defaults {
+  /// Required, and absent from defaults.
+  @A.SetAtInstall
+  bucket: V.NonEmptyString?
+  /// An open object with a default.
+  resources: V.OpenObject = new Dynamic { requests { cpu = "50m" } }
+  /// An open object without one.
+  extra: V.OpenObject
+  /// A class with a default of its own.
+  limits: Limits = new Limits { cpu = "2" }
+  /// A class whose default is exactly the class's own: no default.
+  plain: Limits
+}
+
+/// A class of two defaulted fields.
+class Limits {
+  /// CPU.
+  cpu: String = "1"
+  /// Memory.
+  memory: String = "1Gi"
+}
