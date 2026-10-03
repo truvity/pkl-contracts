@@ -26,6 +26,28 @@ labels: V.OpenObject = new Dynamic { team = "platform" }
 /// Where the service archives what it served. Absent means it does not.
 archive: Archive?
 
+/// How the service calls out. Every field of it has a default, and so has the
+/// `retry` block inside it, so the whole block may be left out of a document.
+client: Client
+
+/// How the service calls out.
+class Client {
+  /// How long one call may take, in seconds.
+  timeoutSeconds: V.PositiveInt = 5
+  /// What is tried again.
+  retry: Retry
+  /// A proxy to go through; absent means none.
+  proxy: V.NonEmptyString?
+}
+
+/// What is tried again, and how often.
+class Retry {
+  /// How many attempts in all.
+  attempts: V.PositiveInt = 3
+  /// Whether a call that is not safe to repeat is repeated too.
+  idempotentOnly: Boolean = true
+}
+
 /// How long what the service keeps is kept.
 class Retention {
   /// Days before it is deleted.

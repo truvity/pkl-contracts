@@ -7,6 +7,58 @@ under one version, so a heading covers all of them.
 
 ## Unreleased
 
+### Fixes
+
+- **A block whose fields all have defaults is optional, and carries its default,
+  in every generated artifact.** Pkl gives a property of a class type that nobody
+  sets an instance of the class built from its defaults (`resources: Resources`),
+  so an author may leave it out, but the generators listed it as required with no
+  default: a JSON Schema validator refused a document Pkl accepted, and the chart's
+  values schema said `required` for a key `values.yaml` already carried. A class is
+  now default-complete when every property has a default, is nullable, or is such a
+  block itself; such a property is out of `required` and has the rendered instance
+  as its `default` (the JSON Schema, the chart's values schema, `values.yaml`,
+  zod's `.default(...)`, pydantic's `Field(default_factory=...)` and the
+  reference's "Required: no" with its default). A block with a field that has no
+  default, with a value set at install, or an open object that must carry keys,
+  stays required. This is a widening: a document valid before is valid now.
+- **A class that extends another one that is not a document of its own keeps what
+  it inherits.** The inherited properties were dropped from the JSON Schema, zod,
+  pydantic and the reference, and a document that set one was refused as an unknown
+  key.
+- **A property whose name is not an identifier generates working code.** zod emitted
+  `service-lib: ...` as a bare key (a syntax error); pydantic declared it as an
+  attribute, and also a Python keyword (`global`), a leading digit and a leading
+  underscore (which pydantic drops as private). zod now quotes the key; pydantic
+  declares a name Python can and sets `Field(alias="<key>")`, so the document's key
+  is unchanged. `@RequiredWhen` over such a name is written the same way.
+- **A default with a line break, a tab, a separator, a quote or a backslash no
+  longer breaks the generated source.** A raw line feed in a zod `.default("...")`
+  or a pydantic `Field(default="...")` made the whole file fail to parse; control
+  characters and the line and paragraph separators are now escapes. A class
+  documentation that ends in a quote no longer closes pydantic's docstring early.
+  In the reference and the chart's values table such a default is one escaped
+  cell, and a bar in a default no longer splits the values table's row.
+- **A map keyed by an enum** (`Mapping<LogLevel, X>`) names its keys in the JSON
+  Schema (`propertyNames`), so an unknown key is refused as Pkl does, and is a
+  partial record in zod (zod 4 reads a record keyed by an enum as needing every
+  member).
+- **A union with a list, a map, a format or a required key in it keeps what each
+  member says.** `Listing<NonEmptyString> | NonEmptyString` came out as
+  `type: ["array", "string"]`, so the items were never checked; it is now an
+  `anyOf` of each member's own schema.
+- **A rule across fields on a class that is not a document of its own is in the JSON
+  Schema.** `@RequiredWhen` was written only for a document (`@Schema`); used on a
+  nested class it was enforced by Pkl, zod and pydantic and ignored by the schema.
+- **A non-nullable open object that must carry keys** (`V.Named`) no longer stops the
+  generators with an evaluation error: the empty object it would default to is not
+  valid, so the property is required.
+- **Set at install is structured data as well as prose.** Every JSON Schema (and the
+  chart's values schema) marks such a property `x-set-at-install: true`, and the
+  reference has a `Set at install` column that says `yes`; the `**Set at install.**`
+  prose stays. An annotation: no validator reads it, and the compatibility diff
+  treats it as no change.
+
 ## v0.3.0 — 2026-10-03
 
 This is a minor release (0.2.x to 0.3.0): it changes the vocabulary's patterns,

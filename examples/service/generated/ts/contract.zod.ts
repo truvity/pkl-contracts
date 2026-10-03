@@ -74,6 +74,8 @@ export const Config_shape = {
   labels: OpenObject.default({"team": "platform"}),
   /** Where the service archives what it served. Absent means it does not. */
   archive: z.lazy(() => ConfigArchive).optional(),
+  /** How the service calls out. Every field of it has a default, and so has the `retry` block inside it, so the whole block may be left out of a document. */
+  client: z.lazy(() => ConfigClient).default({"timeoutSeconds": 5, "retry": {"attempts": 3, "idempotentOnly": true}}),
 };
 export const Config = z.strictObject(Config_shape);
 export type Config = z.infer<typeof Config>;
@@ -119,6 +121,28 @@ export const ConfigArchive_shape = {
 };
 export const ConfigArchive = z.strictObject(ConfigArchive_shape);
 export type ConfigArchive = z.infer<typeof ConfigArchive>;
+
+/** How the service calls out. */
+export const ConfigClient_shape = {
+  /** How long one call may take, in seconds. */
+  timeoutSeconds: PositiveInt.default(5),
+  /** What is tried again. */
+  retry: z.lazy(() => ConfigRetry).default({"attempts": 3, "idempotentOnly": true}),
+  /** A proxy to go through; absent means none. */
+  proxy: NonEmptyString.optional(),
+};
+export const ConfigClient = z.strictObject(ConfigClient_shape);
+export type ConfigClient = z.infer<typeof ConfigClient>;
+
+/** What is tried again, and how often. */
+export const ConfigRetry_shape = {
+  /** How many attempts in all. */
+  attempts: PositiveInt.default(3),
+  /** Whether a call that is not safe to repeat is repeated too. */
+  idempotentOnly: z.boolean().default(true),
+};
+export const ConfigRetry = z.strictObject(ConfigRetry_shape);
+export type ConfigRetry = z.infer<typeof ConfigRetry>;
 
 /** The health listener. Separate from the service's own traffic, so that readiness is answerable when the service's listener is saturated, and so that a probe is not reachable from outside. */
 export const Probes_shape = {

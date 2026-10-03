@@ -62,7 +62,8 @@
         "bucket": {
           "type": "string",
           "minLength": 1,
-          "description": "The bucket. Every install names its own, so the defaults leave it out and the\nschema requires it."
+          "description": "The bucket. Every install names its own, so the defaults leave it out and the\nschema requires it.",
+          "x-set-at-install": true
         },
         "prefix": {
           "type": "string",
@@ -78,6 +79,53 @@
         }
       },
       "description": "Where the service archives what it served. Absent means it does not."
+    },
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long one call may take, in seconds.",
+          "default": 5
+        },
+        "retry": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "How many attempts in all.",
+              "default": 3
+            },
+            "idempotentOnly": {
+              "type": "boolean",
+              "description": "Whether a call that is not safe to repeat is repeated too.",
+              "default": true
+            }
+          },
+          "description": "What is tried again.",
+          "default": {
+            "attempts": 3,
+            "idempotentOnly": true
+          }
+        },
+        "proxy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A proxy to go through; absent means none."
+        }
+      },
+      "description": "How the service calls out. Every field of it has a default, and so has the\n`retry` block inside it, so the whole block may be left out of a document.",
+      "default": {
+        "timeoutSeconds": 5,
+        "retry": {
+          "attempts": 3,
+          "idempotentOnly": true
+        }
+      }
     }
   }
 }

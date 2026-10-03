@@ -106,6 +106,9 @@ drain) and what it needs of its own."""
     labels: OpenObject = Field(default={"team": "platform"})
     #: Where the service archives what it served. Absent means it does not.
     archive: ConfigArchive | None = None
+    #: How the service calls out. Every field of it has a default, and so has the
+    #: `retry` block inside it, so the whole block may be left out of a document.
+    client: ConfigClient = Field(default_factory=lambda: ConfigClient.model_validate({"timeoutSeconds": 5, "retry": {"attempts": 3, "idempotentOnly": True}}))
 
 
 class Listen(_Closed):
@@ -141,6 +144,24 @@ class ConfigArchive(_Closed):
     prefix: NonEmptyString = Field(default="echo/requests")
     #: How often a batch is written, in seconds: not more often than every ten.
     batchSeconds: Annotated[int, BeforeValidator(_integral), Field(ge=10)] = Field(default=60)
+
+
+class ConfigClient(_Closed):
+    """How the service calls out."""
+    #: How long one call may take, in seconds.
+    timeoutSeconds: PositiveInt = Field(default=5)
+    #: What is tried again.
+    retry: ConfigRetry = Field(default_factory=lambda: ConfigRetry.model_validate({"attempts": 3, "idempotentOnly": True}))
+    #: A proxy to go through; absent means none.
+    proxy: NonEmptyString | None = None
+
+
+class ConfigRetry(_Closed):
+    """What is tried again, and how often."""
+    #: How many attempts in all.
+    attempts: PositiveInt = Field(default=3)
+    #: Whether a call that is not safe to repeat is repeated too.
+    idempotentOnly: bool = Field(default=True)
 
 
 class Probes(_Closed):

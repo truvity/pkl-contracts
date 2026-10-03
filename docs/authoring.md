@@ -104,6 +104,10 @@ rendered `values.yaml` leaves it out); `@A.SetAtInstall`, so that every generato
 reads it as required: it is in the JSON Schema's `required` (and the chart's
 values schema), the zod and pydantic field is not optional, the reference and the
 values table say "Set at install". The test loader refuses a document without it.
+The same fact is stated as data for a tool: `x-set-at-install: true` on the
+property in every JSON Schema (an annotation that no validator reads), and a
+`Set at install` column of the reference that says `yes`. The prose stays, but
+nothing needs to parse it.
 It is never combined with a default, and on a string it needs a type that refuses
 `""`, so that the requirement is of a real value.
 
@@ -120,11 +124,36 @@ Kubernetes' resource requests in it, or a class given a default of its own. The
 JSON Schema `default`, `values.yaml`, zod, pydantic and the reference carry it
 whole. Reflection cannot tell an explicit default from the one Pkl gives every
 object, so the model compares them: a default that differs from what the class
-declares for itself is explicit, and its property is optional. A default that is
-exactly the class's own is none, and such a property stays required, because its
-fields carry their own defaults.
+declares for itself is explicit, and its property is optional.
 
-*Checked by:* `hack/defaults-check.py`, on the worked example.
+## A block nobody sets is Pkl's default, when that is valid
+
+A property of a class type that is not nullable and has no default of its own
+(`resources: Resources`) still has one in Pkl: an instance built from the class's
+own defaults, which an author may leave out. A document may leave it out too, if
+and only if the class is **default-complete**: every property has a default, is
+nullable, or is itself of a default-complete class type, recursively (a class
+met again on the way down is not complete). Such a property is **optional**, and
+its `default` is that instance, rendered whole, nested blocks included. A JSON
+Schema `default` is an annotation: a validator does not fill it in, so the
+property is out of `required` AND carries the default, which is what
+`values.schema.json`, `values.yaml`, zod (`.default(...)`), pydantic
+(`Field(default_factory=...)`) and the reference (not required, with its default)
+all say. Pkl's own default for a `Listing`, a `Mapping` and a `Dynamic` is the
+empty one, and is treated the same way.
+
+A class stays required, and its property too, when it has a property with no
+default that is not nullable, when it has a `@SetAtInstall` property (an install
+must supply it, so Pkl's own instance would be wrong), when it has a block that is
+itself not default-complete, or when it is an open object that must carry keys
+(`V.Named`: the empty one is not valid, and Pkl cannot even be asked for its
+default, so it is read as having none). What a class inherits counts, including
+from a class that is not a document of its own.
+
+*Checked by:* `test/ModelTest.pkl`, the conformance fixtures `blocks` and
+`inherit` (a document that omits a default-complete block is accepted by every
+validator, Pkl included; one that omits a block that is not is refused by all),
+and `hack/defaults-check.py`, on the worked example.
 
 ## One literal union, one place
 
@@ -181,7 +210,8 @@ contract picks one meaning:
   *Checked by:* `test/LintTest.pkl`, which scans every `@A.Pattern`, and the
   probes.
 - **A field with a default is optional.** Pkl cannot say both "required" and
-  "has a default", and a default on a required field documented nothing.
+  "has a default", and a default on a required field documented nothing. A block
+  whose class is default-complete (the section above) is optional the same way.
 - **`null` is not a value for an optional field.** An optional field is absent,
   or present with a value. Pkl's own evaluation is lenient about `null`, so a
   contract never writes one and a field is never both nullable and defaulted.
@@ -276,6 +306,12 @@ are shapes: none of the contract's constraints survives into a Go struct or a
 Kotlin class, so a service validates against the generated JSON Schema, and the
 type says only what the fields are. Kotlin cannot generate a module with a union
 type (`Int | String`), which is why the platform block has no Kotlin class.
+
+A property whose name is not an identifier (`service-lib`) keeps its key in every
+artifact. zod quotes it; pydantic declares the attribute under a name Python can
+(`service_lib`, `global_` for a keyword, `f_2fa` for a leading digit) with
+`Field(alias="service-lib")`, and validates the document's key. A Python name that
+two properties would share is refused when the module is generated.
 
 The secrets column of the reference lists a field that names a secret, by the
 contract's own convention (a name ending in `Env`, or a `Secret` class), because
