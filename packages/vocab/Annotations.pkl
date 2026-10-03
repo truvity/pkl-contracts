@@ -13,17 +13,27 @@ class Schema extends Annotation {
   title: String?
 }
 
-/// A numeric range, inclusive at both ends. On an alias it is the alias's own
-/// range; on a PROPERTY it narrows the type the property has (the two are
-/// intersected, so a property can only tighten what its type already says), and
-/// `Check.pkl` makes Pkl enforce it: Pkl itself has no constraint a property
-/// could carry.
+/// A numeric range. `min` and `max` are inclusive, `exclusiveMin` and
+/// `exclusiveMax` are not (`exclusiveMin = 0` is "greater than zero"), and each
+/// side may carry either, or both (the stricter holds). On an alias it is the
+/// alias's own range; on a PROPERTY it narrows the type the property has (the two
+/// are intersected, so a property can only tighten what its type already says),
+/// and `Check.pkl` makes Pkl enforce it: Pkl itself has no constraint a property
+/// could carry. A range that leaves no value (`min` above `max`, or the two
+/// meeting where either side is exclusive) is refused when the contract is
+/// reflected.
 class Range extends Annotation {
   /// The least value allowed. Absent means unbounded.
   min: Number?
 
   /// The greatest value allowed. Absent means unbounded.
   max: Number?
+
+  /// The value the number must be greater than. Absent means no such bound.
+  exclusiveMin: Number?
+
+  /// The value the number must be less than. Absent means no such bound.
+  exclusiveMax: Number?
 }
 
 /// A string length bound. Like `Range`, it is an alias's own, or, on a property,
@@ -82,17 +92,63 @@ class Format extends Annotation {
   name: String
 }
 
-/// A conditional requirement: when `property` is one of `in`, every property
-/// in `require` must be present. Pkl cannot reflect a class-level constraint.
+/// A conditional requirement: when the value at `property` is one of `in`, every
+/// path in `require` must be present. Written on a class, a module (a document or
+/// a chart's values) or an alias of a class, and read from there by every
+/// generator.
+///
+/// `property` and each entry of `require` are DOTTED PATHS from the annotated
+/// class: `mode`, or `alerts.remote.enabled`, through blocks (a property whose
+/// type is a class) and never through a list or a map. Every path is resolved
+/// against the contract when it is generated, and a path that does not exist, a
+/// condition that is neither a boolean nor an enum, a value of `in` the property
+/// cannot hold, or a path that cannot be told apart in a schema and in Pkl (see
+/// the model) is a generation error, never a rule that silently never fires.
+///
+/// "Present" is "not absent": a document that has not set the property. So a
+/// required path must be a property without a default (nullable, or set at
+/// install), and the condition's property must not default to a member of `in`:
+/// a schema validator does not fill defaults in, so such a rule would mean two
+/// things.
+///
+/// `in` holds strings for an enum and booleans for a boolean.
+///
+/// On a class or a module `contracts.vocab.Check` makes Pkl enforce it; on an
+/// alias the alias's own constraint does, as it always has (the alias writes
+/// the rule once more as a lambda).
 class RequiredWhen extends Annotation {
-  /// The property that decides.
+  /// The path of the property that decides.
   property: String
 
   /// The values of `property` that make `require` mandatory.
-  `in`: Listing<String>
+  `in`: Listing<String | Boolean>
 
-  /// The properties that must then be present.
+  /// The paths that must then be present.
   require: Listing<String>
+}
+
+/// The converse of `RequiredWhen`: every path in `require` must be present
+/// UNLESS the value at `property` is one of `in`. A document that does not set
+/// `property` at all (or any block on the way to it) is therefore asked for them,
+/// which is what "required unless it is switched off" means. The same paths, the
+/// same limits and the same enforcement as `RequiredWhen`.
+class RequiredUnless extends Annotation {
+  /// The path of the property that excuses.
+  property: String
+
+  /// The values of `property` that excuse `require`.
+  `in`: Listing<String | Boolean>
+
+  /// The paths that are mandatory otherwise.
+  require: Listing<String>
+}
+
+/// Keys an open object or a map must NOT carry. On a PROPERTY whose type is a
+/// `Mapping` or an open object (`Dynamic`); the property is then no longer the
+/// vocabulary alias it had, and `Check.pkl` makes Pkl enforce it.
+class DenyKeys extends Annotation {
+  /// The keys that are refused. At least one.
+  keys: Listing<String>(!isEmpty)
 }
 
 /// An open object (Pkl `Dynamic`) that must still carry certain keys.

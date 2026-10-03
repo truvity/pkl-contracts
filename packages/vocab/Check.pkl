@@ -1,6 +1,7 @@
 /// Pkl's enforcement of the constraints a PROPERTY carries as an annotation
 /// (`@A.Range`, `@A.Length` on a property, narrowing the vocabulary type it
-/// has).
+/// has; `@A.DenyKeys`), and of the rules a CLASS or a MODULE carries across its
+/// fields (`@A.RequiredWhen`, `@A.RequiredUnless`).
 ///
 /// Pkl has nowhere to put such a rule. A constraint belongs to a TYPE, and a type
 /// cannot read the annotation of the property it is the type of; a class cannot
@@ -22,7 +23,12 @@
 /// A module that does not extend a template calls it itself:
 /// `output { value = Check.checked(module) }`.
 ///
-/// Only the bounds are checked here. A type's own constraint (an alias) is
+/// A rule across fields is read from the class of every object (and of every
+/// class it extends) and from a module: a condition is a dotted path through
+/// blocks (a property that is `null` on the way is "absent"), compared with the
+/// values the rule lists, and each path it then requires must not be `null`.
+///
+/// Only the annotations are checked here. A type's own constraint (an alias) is
 /// Pkl's own, and a property that is `null` is absent and has nothing to check.
 module contracts.vocab.Check
 
@@ -51,6 +57,18 @@ local function rangeProblems(a: Dynamic, x: Number, path: String): List<String> 
       else
         List()
     )
+    + (
+      if (a.exclusiveMin != null && x <= a.exclusiveMin)
+        List("`\(path)` is \(x), not greater than \(a.exclusiveMin) as its annotation requires")
+      else
+        List()
+    )
+    + (
+      if (a.exclusiveMax != null && x >= a.exclusiveMax)
+        List("`\(path)` is \(x), not less than \(a.exclusiveMax) as its annotation requires")
+      else
+        List()
+    )
 
 local function lengthProblems(a: Dynamic, x: String, path: String): List<String> =
   (
@@ -66,6 +84,12 @@ local function lengthProblems(a: Dynamic, x: String, path: String): List<String>
         List()
     )
 
+local function denyProblems(a: Dynamic, x: Any, path: String): List<String> =
+  a.keys
+    .toList()
+    .filter((k) -> x.toMap().containsKey(k))
+    .map((k) -> "`\(path)` has the key `\(k)`, which its annotation refuses")
+
 /// What property `p`'s own annotations say is wrong with its value `x`.
 local function own(p: reflect.Property, x: Any, path: String): List<String> =
   if (x == null)
@@ -76,6 +100,54 @@ local function own(p: reflect.Property, x: Any, path: String): List<String> =
         rangeProblems(a.toDynamic(), x, path)
       else if (named(a, "Length") && x is String)
         lengthProblems(a.toDynamic(), x, path)
+      else if (named(a, "DenyKeys") && (x is Mapping || x is Dynamic))
+        denyProblems(a.toDynamic(), x, path)
+      else
+        List()
+    )
+
+/// The annotations of class `c` and of every class it extends, up to Pkl's own.
+/// A module's class carries the module's annotations.
+local function chain(c: reflect.Class): List<Annotation> =
+  c.annotations
+    + (
+      if (c.superclass == null || c.superclass.enclosingDeclaration.uri == "pkl:base")
+        List()
+      else
+        chain(c.superclass)
+    )
+
+/// The value at the dotted path `segments` under `v`: `null` when anything on the
+/// way is absent.
+local function valueAt(v: Any, segments: List<String>): Any =
+  segments.fold(v, (cur, s) ->
+    if (cur == null)
+      null
+    else if (cur.hasProperty(s))
+      cur.getProperty(s)
+    else
+      null
+  )
+
+local function said(values: Listing): String = values.toList().map((x) -> "`\(x)`").join(" or ")
+
+/// What the conditional requirements of class `c` say is wrong with `v`.
+local function conditionProblems(v: Any, c: reflect.Class, path: String): List<String> =
+  chain(c)
+    .flatMap((a) ->
+      if (named(a, "RequiredWhen") || named(a, "RequiredUnless"))
+        let (d = a.toDynamic())
+        let (unless = named(a, "RequiredUnless"))
+        let (decides = d.`in`.toList().contains(valueAt(v, d.property.split("."))))
+          if (unless != decides)
+            d.require
+              .toList()
+              .filter((r) -> valueAt(v, r.split(".")) == null)
+              .map((r) ->
+                "`\(join(path, r))` is required \(if (unless) "unless" else "when") `\(join(path, d.property))` is \(said(d.`in`))"
+              )
+          else
+            List()
       else
         List()
     )
@@ -103,6 +175,7 @@ local function walk(v: Any, path: String): List<String> =
           let (at = join(path, e.first))
             own(e.second, x, at) + walk(x, at)
         )
+        + conditionProblems(v, c, path)
   else
     List()
 
@@ -110,7 +183,8 @@ local function join(path: String, name: String): String =
   if (path == "") name else "\(path).\(name)"
 
 /// Everything wrong in `v` and in the objects below it: one sentence for each
-/// property whose value is outside its `@Range` or `@Length`.
+/// property whose value is outside its `@Range` or `@Length`, has a key its
+/// `@DenyKeys` refuses, or each path a condition requires and finds absent.
 function problems(v: Any): List<String> = walk(v, "")
 
 /// `v` itself when no property's bound is broken; otherwise an error naming every
@@ -120,4 +194,4 @@ function checked(v: Any): Any =
     if (ps.isEmpty)
       v
     else
-      throw("a value is outside the bound its property declares:\n  " + ps.join("\n  "))
+      throw("a value breaks a rule its contract declares:\n  " + ps.join("\n  "))

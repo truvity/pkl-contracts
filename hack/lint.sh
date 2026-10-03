@@ -10,7 +10,7 @@
 #      once, in packages/vocab/Vocab.pkl, reviewed once and used everywhere: no
 #      `Regex(`, no constrained type (`String(length >= 1)`), no alias, in any
 #      other module. The one exception is a cross-field rule, which is an alias
-#      annotated @A.RequiredWhen so that a generator can read it.
+#      annotated @A.RequiredWhen or @A.RequiredUnless so that a generator can read it.
 #   2. The vocabulary spells every pattern one way: through `search`, which
 #      has search semantics and refuses a newline; never `matches`, which is a
 #      full match. Each pattern alias is annotated with the same constant.
@@ -72,7 +72,7 @@ for f in "${pkl[@]}"; do
   # an alias: only a cross-field rule, and only with the annotation that says so
   code "$f" | awk -F: -v f="$f" '
     { n=$1; s=substr($0, length($1)+2) }
-    s ~ /RequiredWhen/ { ok=1 }
+    s ~ /Required(When|Unless)/ { ok=1 }
     s ~ /^[[:space:]]*(class|module|open module)[[:space:]]/ { ok=0 }
     s ~ /^[[:space:]]*typealias[[:space:]]/ {
       if (!ok) { printf "LINT: %s:%d: an alias outside the vocabulary: %s\n", f, n, s; bad=1 }
