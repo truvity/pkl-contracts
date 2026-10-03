@@ -3,9 +3,48 @@
 What changed for someone consuming these packages, newest first, one heading
 per tag. The prose bullets are written for a consumer; the commit subjects under
 them are the GitHub Release's own list. All packages are released together
-under one version, so a heading covers all three.
+under one version, so a heading covers all of them.
 
 ## Unreleased
+
+### Packages
+
+- **`contracts.model`: the reflection every generator shares.** A contract's
+  modules as classes, properties, types and the vocabulary's constraints.
+  Annotations are recognised by class name, so a generator works for a consumer
+  that depends on the vocabulary as a package.
+- **`contracts.jsonschema`: JSON Schema (draft 2020-12).** One document per
+  shape, composed by `$ref`, the vocabulary's constraints as keywords; a
+  pattern is paired with `not: { pattern: "\\n" }` so that it never admits a
+  newline in any engine. Its second entry point, `Compat.pkl`, compares two
+  directories of schemas and reports what is breaking: a removed property, a
+  newly required one, a narrowed type, enum or range, a closed object, a
+  tightened pattern.
+- **`contracts.helm`: a chart's values.** `values.schema.json` with the platform
+  and config schemas composed (every document embedded, so that Helm validates
+  offline), the `values.yaml` defaults, and a README values table.
+- **`contracts.typescript`: TypeScript types and zod schemas.**
+- **`contracts.python`: pydantic v2 models.** An explicit `null` for an optional
+  field is refused, and an integral float is an integer.
+- **`contracts.docs`: a Markdown reference** of every field with its type,
+  default, constraints and whether it names a secret.
+- Each generator is a `pkl:Command` (`Generate.pkl`) that takes the modules of a
+  contract as arguments. Go and Kotlin come from the official generators, pinned
+  behind `hack/codegen.sh`; their types are shapes and the schema is the
+  validator.
+
+### Tooling
+
+- **Cross-language conformance** (`just conformance`, and `just
+  conformance-kotlin` for Kotlin): nine validators (four JSON Schema engines,
+  zod, pydantic, Go and Kotlin through the official generators' types, and Pkl
+  itself) must agree on every fixture and probe. The three splits the
+  prototype found are gone: a trailing newline, an explicit `null`, and an
+  integral float.
+- **`just generated`** fails when `examples/service/generated` is stale, and
+  **`just compat`** fails on a breaking change against the last release tag.
+- The test loader (`test/Load.pkl`) now refuses an explicit `null` and accepts an
+  integral float, as decision 0010 says.
 
 ### Releases
 

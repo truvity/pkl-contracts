@@ -179,7 +179,7 @@ covered. A property added, a type or enum widened, a range relaxed and a pattern
 removed are compatible and only reported. The rules are in
 `packages/jsonschema/Compatibility.pkl` and are tested on synthetic pairs in
 `test/CompatTest.pkl`. A breaking change that is meant passes when the
-CHANGELOG's `## Unreleased` section says "breaking".
+CHANGELOG's `## Unreleased` section has an entry that begins `- **Breaking`.
 
 ## Conformance
 
