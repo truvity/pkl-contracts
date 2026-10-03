@@ -1,0 +1,29 @@
+# What this repository trusts from outside, checked daily: the `vuln` recipe,
+# through the same shared workflow that runs every other recipe. There is no Go
+# module here, so the recipe is not govulncheck: it confirms that the checksums
+# bin/pkl pins are the digests GitHub publishes for the Pkl release it fetches.
+#
+# Deliberately NOT in ci.yaml's recipe list, NOT in `just check`, and not a
+# required context (the component contract's C10). An upstream change is news
+# about the world, not about the change under review, and a failure here with no
+# fix to hand would otherwise turn every pull request red.
+#
+# Pinned by COMMIT SHA with the tag in a comment, like every other caller.
+name: Security
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: "0 6 * * *" # daily 6am UTC
+
+permissions:
+  contents: read
+
+jobs:
+  vuln:
+    uses: truvity/ci-workflows/.github/workflows/check.yaml@80bb5351442e2e0948ed13d500340bc7854f369f # v3.20.0
+    with:
+      recipes: '["vuln"]'
