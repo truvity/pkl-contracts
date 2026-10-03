@@ -1,0 +1,63 @@
+/// The defaults the worked example's contract declares, as JSON, for
+/// `hack/defaults-check.py`: which property of which class (and document, and
+/// chart path) has which default. It is the one place the expectation comes
+/// from, Pkl's own reflection, so that a generator that drops a default is
+/// measured against the contract and not against its own output.
+///
+///     pkl eval --project-dir examples/service -f json examples/service/Defaults.pkl
+module example.Defaults
+
+import "@model/Model.pkl"
+
+import "Chart.pkl"
+import "Config.pkl"
+
+local chartNode: Model.Node = Model.chartOf(Chart)!!
+local docs: Mapping<String, Model.Node> = Model.documents(List(Config, Chart))
+
+/// The defaults of every class in `n` that is not another document, as
+/// [property, default] pairs, sorted.
+local function ownDefaults(n: Model.Node): List<List<Any>> =
+  Model
+    .walkOwn(n)
+    .filter((m) -> m.kind == "object" && (m.schema == null || m == n))
+    .flatMap((m) -> m.cls.props)
+    .filter((p) -> p.hasDefault)
+    .map((p) -> List(p.name, p.default))
+    .sortBy((e) -> e[0] as String)
+
+/// The defaults at chart paths, for `values.yaml`.
+local function paths(prefix: String, c: Model.Cls): List<Dynamic> =
+  c.props.flatMap((p) ->
+    let (dotted = if (prefix == "") p.name else "\(prefix).\(p.name)")
+      (
+        if (p.hasDefault)
+          List(new Dynamic { path = dotted; ["default"] = p.default })
+        else
+          List()
+      )
+        + (if (p.type.kind == "object") paths(dotted, p.type.cls) else List())
+  )
+
+local all: List<Model.Node> = Model.classes(docs.toMap().values.toList() + List(chartNode))
+
+output {
+  renderer = new JsonRenderer { omitNullProperties = false }
+  value = new Dynamic {
+    // Per document key: its `$id` and the defaults inside it.
+    documents =
+      docs.toMap().mapValues((_, n) -> new Dynamic { id = n.schema.id; defaults = ownDefaults(n) })
+    // The chart's own (root) properties' defaults.
+    chartRoot = ownDefaults(chartNode)
+    // Per class (qname): property to default.
+    classes =
+      all.toMap(
+        (n) -> n.cls.qname,
+        (n) ->
+          n.cls.props
+            .filter((p) -> p.hasDefault)
+            .toMap((p) -> p.name, (p) -> p.default),
+      )
+    chart = paths("", chartNode.cls)
+  }
+}

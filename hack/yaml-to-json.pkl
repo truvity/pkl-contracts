@@ -1,0 +1,13 @@
+/// A YAML file as JSON, for `hack/defaults-check.py`:
+///
+///     pkl eval -f json -p file=<path> hack/yaml-to-json.pkl
+module yamlToJson
+
+import "pkl:yaml"
+
+local path = read("prop:file")
+
+output {
+  renderer = new JsonRenderer {}
+  value = new yaml.Parser { useMapping = false }.parse(read(path))
+}

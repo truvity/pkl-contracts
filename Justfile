@@ -73,8 +73,11 @@ generate:
     hack/generate.sh
 
 # Regenerate into a temporary directory and compare with the committed copy, so
-# that a change to a generator or to the contract cannot leave it stale.
-[doc("Fail if examples/service/generated is stale")]
+# that a change to a generator or to the contract cannot leave it stale. Then
+# check what a diff cannot: that every default the contract declares is in every
+# artifact (hack/defaults-check.py), because a generator that drops one changes
+# no verdict of the conformance suite and, regenerated, no golden either.
+[doc("Fail if examples/service/generated is stale or lacks a default")]
 generated:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -82,6 +85,7 @@ generated:
     trap 'rm -rf "$tmp"' EXIT
     hack/generate.sh "$tmp/generated" >/dev/null
     diff -r "$tmp/generated" examples/service/generated
+    python3 hack/defaults-check.py "$tmp/generated"
     echo "generated: examples/service/generated is current"
 
 # Compare the JSON Schemas generated for the worked example with the last
@@ -110,9 +114,29 @@ conformance-kotlin:
 
 # Build the packages exactly as a release will publish them, into .out/,
 # and check the metadata against the URIs GitHub will serve.
+#
+# `pkl project package` refuses a package whose contents differ from the one
+# already published at the same version. Between a release and the next, every
+# change to packages/ is exactly that: the version in packages/Release.pkl is
+# bumped by auto-release in its own heading PR, never by the change. So while
+# the declared version is already released (its tag exists) and packages/ differs
+# from the tag, the comparison is skipped and the CHANGELOG must say what is
+# Unreleased instead; where packages/ equals the release (the release commit
+# itself), and for a version not yet released, the comparison runs.
 [doc("Build the packages, check their metadata, run the generators as packages")]
 package:
-    {{pkl}} project package {{packages}} --output-path '.out/%{name}@%{version}'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version="$(sed -n 's/^version = "\(.*\)"$/\1/p' packages/Release.pkl)"
+    flag=""
+    git fetch --quiet --depth=1 origin "refs/tags/v$version:refs/tags/v$version" 2>/dev/null || true
+    if tag="$(git rev-parse --quiet --verify "refs/tags/v$version^{commit}")" && ! git diff --quiet "$tag" -- packages; then
+        awk '/^## Unreleased/{f=1;next} /^## /{f=0} f' CHANGELOG.md | grep -q '[^[:space:]]' \
+            || { echo "package: v$version is released and the packages differ from it, but CHANGELOG.md has nothing under '## Unreleased'" >&2; exit 1; }
+        echo "package: v$version is already released; its contents are not compared (auto-release bumps the version), the CHANGELOG's Unreleased section is the record"
+        flag="--skip-publish-check"
+    fi
+    {{pkl}} project package {{packages}} $flag --output-path '.out/%{name}@%{version}'
     hack/package-check.sh
     hack/package-smoke.sh
 
