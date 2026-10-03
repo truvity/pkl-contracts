@@ -3,10 +3,12 @@
 ///
 /// This is where `pkl:reflect`'s gaps are paid for once: it has no constrained
 /// type (so constraints come from annotations on aliases and on properties), no
-/// way to tell an explicit default from an implicit one (so optional means
-/// nullable, and an object-valued property is required unless its default
-/// differs from what its class declares), and no module graph (so the modules to
-/// generate for are given to the generator, which reads each one's own
+/// way to tell an explicit default from an implicit one (so an object-valued
+/// property is told apart by comparing its default with what its class declares:
+/// a default that differs is explicit; one that is the class's own is Pkl's
+/// implicit default, which a document may rely on only when the class is
+/// default-complete, see `defaultComplete`), and no module graph (so the modules
+/// to generate for are given to the generator, which reads each one's own
 /// declarations).
 module contracts.model.Model
 
@@ -57,9 +59,19 @@ class Node {
 class Prop {
   name: String
   type: Node
+  /// A document must carry it: it has no default of any kind and is not nullable,
+  /// or it is set at install.
   required: Boolean
+  /// It has a default a reader may rely on: one the contract wrote, or, for an
+  /// object, the one Pkl gives it when its class is default-complete.
   hasDefault: Boolean
+  /// The default, as JSON-shaped data (a `Map` for an object). For an object with
+  /// an implicit default, the class's own defaults, rendered whole.
   default: Any
+  /// It has nothing of its own to fall back on: no default written, not
+  /// nullable, not set at install. Whether that makes it required depends on its
+  /// type: an object whose class is default-complete is still optional.
+  bare: Boolean = false
   doc: String?
   /// The schema requires it and a chart's defaults leave it out (`@SetAtInstall`).
   /// It is nullable in Pkl, so that the module of defaults need not set it.
@@ -296,10 +308,22 @@ local function implicit(t: reflect.Type): Any =
 /// cannot tell, but it can compare: the property's default against what its
 /// class declares for itself. A default that is exactly the class's own is none
 /// (the fields carry their defaults), which is why such a property is required.
-local function explicitObject(p: reflect.Property): Boolean =
+local function explicitObject(p: reflect.Property, n: Node): Boolean =
   !isModuleType(p.type)
+    && readable(n)
     && p.defaultValue != null
     && p.defaultValue.toString() != implicit(p.type).toString()
+
+/// Whether the default of a property of type `n` can be read. Pkl checks a
+/// constraint when a value is read, and reflection has no way to catch the error,
+/// so an open object that must carry keys (`V.Named`), whose implicit default
+/// `{}` breaks its own constraint, cannot be asked for its default: it is an
+/// error, not a null. Such a property is read as having none, so it is required.
+local function readable(n: Node): Boolean = n.requiresKeys == null
+
+/// The default of `p` (of type `n`), or null when it has none that can be read.
+local function defaultOf(p: reflect.Property, n: Node): Any =
+  if (readable(n)) p.defaultValue else null
 
 /// A property whose type is a module (`config: ServiceConfig`): its default is
 /// the module's own, not a default the property was given.
@@ -312,19 +336,63 @@ local function isModuleType(t: reflect.Type): Boolean =
   else
     false
 
+/// The properties of `c` and of the classes it extends, the base first.
+local function allProps(c: Cls): List<Prop> =
+  (if (c.base != null) allProps(c.base.cls) else List()) + c.props
+
+/// Whether Pkl's own default for a value of type `n` (an instance built from the
+/// class's defaults, or an empty object) is a value the contract accepts, so that
+/// a document may leave the property out. A class is default-complete when every
+/// property has a default, is nullable, or is itself of a default-complete class
+/// type (recursively). A property that is set at install, or has no default and is
+/// not nullable, makes the class not complete; so does an open object that must
+/// carry keys. `seen` guards a cycle: a class met again on the way down is not
+/// complete (its own default would never end).
+local function defaultComplete(n: Node, seen: List<String>): Boolean =
+  if (n.kind == "open")
+    n.requiresKeys == null
+  else if (n.kind == "object" && !seen.contains(n.cls.qname))
+    allProps(n.cls)
+      .every((p) ->
+        !p.setAtInstall
+          && (
+            !p.bare
+              || (
+                (p.type.kind == "object" || p.type.kind == "open")
+                  && defaultComplete(p.type, seen + List(n.cls.qname))
+              )
+          )
+      )
+  else
+    false
+
+/// The default of an object a property was not given one for, as the data Pkl
+/// gives: every default of its class (and of the classes it extends), the nested
+/// objects' included. A nullable property is absent.
+local function implicitDefault(n: Node): Any =
+  if (n.kind == "open")
+    Map()
+  else
+    allProps(n.cls)
+      .filter((p) -> p.hasDefault)
+      .toMap((p) -> p.name, (p) -> p.default)
+
 local function propOf(where: String, pname: String, p: reflect.Property): Prop =
   let (here = "\(where).\(pname)")
   let (n = narrowed(here, nodeOf(p.type), p.annotations))
   let (nullable = p.type is reflect.NullableType)
   let (atInstall = find(p.annotations, "SetAtInstall") != null)
-  let (explicit = !isScalarish(n) && explicitObject(p))
+  let (explicit = !isScalarish(n) && explicitObject(p, n))
+  let (own = if (isScalarish(n)) defaultOf(p, n) != null else explicit)
+  let (isBare = !atInstall && !nullable && !own)
+  let (implicitObject = isBare && defaultComplete(n, List()))
     if (nullableMember(p.type))
       throw(nullableMemberMessage(here))
     else if (atInstall && !nullable)
       throw(
         "\(here): @SetAtInstall needs a nullable type (`V.NonEmptyString?`), so that the module of defaults can leave it out"
       )
-    else if (atInstall && p.defaultValue != null)
+    else if (atInstall && defaultOf(p, n) != null)
       throw("\(here): @SetAtInstall and a default contradict: the default is what it leaves out")
     else if (atInstall && n.kind == "string" && (n.length?.min ?? 0) < 1)
       throw(
@@ -337,13 +405,14 @@ local function propOf(where: String, pname: String, p: reflect.Property): Prop =
         doc = p.docComment
         setAtInstall = atInstall
         secret = pname.endsWith("Env") || namesSecret(n)
-        required =
-          atInstall
-            || (!nullable && !explicit && (if (isScalarish(n)) p.defaultValue == null else true))
-        hasDefault = if (isScalarish(n)) p.defaultValue != null else explicit
+        bare = isBare
+        required = atInstall || (isBare && !implicitObject)
+        hasDefault = own || implicitObject
         default =
-          if (isScalarish(n) && p.defaultValue != null || explicit)
+          if (own)
             jsonValue(p.defaultValue)
+          else if (implicitObject)
+            implicitDefault(n)
           else
             null
       }
@@ -356,13 +425,28 @@ local function propsOf(where: String, props: Map<String, reflect.Property>): Lis
     .entries
     .map((e) -> propOf(where, e.first, e.second))
 
+/// The properties `c` inherits from classes that are not documents of their own,
+/// the base's first. A base that is a document (`@Schema`) is not folded in: it
+/// is the `base` of the class, composed by `allOf`; any other base has no schema
+/// to refer to, so what it declares is the class's own.
+local function inherited(c: reflect.Class): Map<String, reflect.Property> =
+  let (sup = c.superclass)
+    if (
+      sup == null
+        || sup.enclosingDeclaration.uri == "pkl:base"
+        || annots(sup.annotations).schema != null
+    )
+      Map()
+    else
+      inherited(sup) + sup.properties.toMap()
+
 local function classOf(c: reflect.Class): Cls =
   let (mod = c.enclosingDeclaration)
   let (sup = c.superclass)
     new Cls {
       qname = qualify(short(mod.name), c.name)
       doc = c.docComment
-      props = propsOf(c.name, c.properties)
+      props = propsOf(c.name, inherited(c) + c.properties.toMap())
       when (
         sup != null
           && sup.enclosingDeclaration.uri != "pkl:base"
@@ -572,7 +656,9 @@ function isChartModule(m: Module): Boolean =
 /// brackets.
 function literal(v: Any): String =
   if (v is String)
-    "\"\(v)\""
+    // Escaped, so that a default with a line break or a quote stays on one line
+    // of a Markdown table and says where it ends.
+    "\"\(v.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"").replaceAll("\n", "\\n").replaceAll("\r", "\\r").replaceAll("\t", "\\t"))\""
   else if (v is List)
     "[\(v.map((e) -> literal(e)).join(", "))]"
   else if (v is Map)
