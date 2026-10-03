@@ -1,0 +1,48 @@
+/// The vocabulary's constraints and its annotations must say the same thing.
+///
+/// Each alias states a constraint twice (the lambda Pkl enforces, the
+/// annotation a generator reads). The probes are generated from the
+/// annotations, and each is run here against Pkl's own enforcement: a probe the
+/// annotation calls valid that Pkl refuses, or one it calls invalid that Pkl
+/// accepts, is drift between the two spellings.
+amends "pkl:test"
+
+import "pkl:reflect"
+
+import "@vocab/Vocab.pkl"
+
+import "Load.pkl"
+import "Model.pkl"
+import "Probes.pkl"
+import "Showcase.pkl"
+
+local root = Model.moduleNode(Showcase)
+local renderer = new JsonRenderer {}
+
+/// Loads a one-property document into the showcase and forces all of it; an
+/// error is Pkl's refusal.
+local function load(prop: String, value: Any): String =
+  renderer.renderValue(Load.load(Showcase, new Dynamic { [prop] = value }))
+
+facts {
+  ["every alias of the vocabulary has a property in the showcase"] {
+    for (name, _ in reflect.Module(Vocab).typeAliases) {
+      root.cls.props.any((p) -> p.type.alias == name)
+        || throw(
+          "`\(name)` is in the vocabulary but has no property in test/Showcase.pkl, so nothing probes it"
+        )
+    }
+  }
+  for (prop, probes in Probes.of(root)) {
+    for (i, pr in probes) {
+      ["\(prop) \(i): \(pr.label), \(pr.why): \(pr.value.toString().replaceAll("\n", "\\n"))"] {
+        when (pr.label == "ok") {
+          load(prop, pr.value).length > 0
+        } else {
+          // `catch` evaluates to the error message, and fails the fact when there is none.
+          module.catch(() -> load(prop, pr.value)).length > 0
+        }
+      }
+    }
+  }
+}

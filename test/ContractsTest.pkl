@@ -1,0 +1,117 @@
+/// The shapes behave as the contracts they were written from say: what they
+/// accept, what they refuse, and what they default.
+///
+/// Each expectation is stated as a value Pkl must accept or a message it must
+/// give. The vocabulary's own boundaries are `ProbesTest.pkl`'s job; these are
+/// the fragments and the templates, in the ways a service author meets them.
+amends "pkl:test"
+
+import "@fragments/Fragments.pkl"
+import "@fragments/Platform.pkl"
+import "@templates/ChartValues.pkl"
+import "@templates/ServiceConfig.pkl"
+
+local renderer = new JsonRenderer {}
+
+/// The JSON of a value, forcing all of it: an error is Pkl's refusal.
+local function json(v: Any): String = renderer.renderValue(v)
+
+/// Whether Pkl refuses the value, and says so.
+local function refuses(v: () -> Any): Boolean = module.catch(() -> json(v.apply())).length > 0
+
+/// The refusal's message, for a test that names the rule.
+local function why(v: () -> Any): String = module.catch(() -> json(v.apply()))
+
+local okProbes = (ServiceConfig) { probes { address = ":7070" } }
+
+facts {
+  ["listen: a host and a port"] {
+    new Fragments.Listen { address = ":8080" }.address == ":8080"
+    refuses(() -> new Fragments.Listen { address = "8080" })
+    refuses(() -> new Fragments.Listen { address = ":8080\n" })
+    refuses(() -> new Fragments.Listen {})
+    refuses(() -> (new Fragments.Listen { address = ":8080" }) { bogus = 1 })
+  }
+  ["log and drain: defaults make the field optional"] {
+    new Fragments.Log {}.level == "info"
+    new Fragments.Drain {}.seconds == 20
+    refuses(() -> new Fragments.Log { level = "trace" })
+    refuses(() -> new Fragments.Drain { seconds = 0 })
+  }
+  ["postgres: a URL without a password"] {
+    new Fragments.Postgres { url = "postgres://u@db.example.com:5432/d" }.maxConnections == 10
+    refuses(() -> new Fragments.Postgres { url = "mysql://u@db.example.com/d" })
+    refuses(() -> new Fragments.Postgres {
+      url = "postgres://u@db.example.com/d"
+      maxConnections = 0
+    })
+  }
+  ["nats: a connection, and a consumer bound to a stream"] {
+    new Fragments.Nats { url = "nats://nats.example.com:4222" }.tls == null
+    refuses(() -> new Fragments.Nats { url = "" })
+    refuses(() -> new Fragments.Nats {
+      url = "nats://nats.example.com:4222"
+      tls = new Fragments.NatsTls {}
+    })
+    refuses(() -> new Fragments.NatsConsumer { stream = "s" })
+  }
+  ["bucket: names, never values"] {
+    new Fragments.Bucket { name = "example-bucket" }.pathStyle == false
+    refuses(() -> new Fragments.Bucket {})
+    refuses(() -> new Fragments.Bucket {
+      name = "b"
+      credentialsEnv = new Fragments.BucketCredentialsEnv { accessKeyID = "A" }
+    })
+  }
+  ["tls: a mode other than off needs the whole identity"] {
+    new Fragments.TlsFields { mode = "off" }.mode == "off"
+    why(() -> (new Fragments.TlsFields { mode = "strict" }) as Fragments.Tls).contains("certFile")
+    refuses(() ->
+      (new Fragments.TlsFields { mode = "permissive"; certFile = "/c" }) as Fragments.Tls
+    )
+    json(
+      (
+        new Fragments.TlsFields {
+          mode = "strict"
+          certFile = "/id/tls.crt"
+          keyFile = "/id/tls.key"
+          caFile = "/id/ca.crt"
+          trustDomain = "example.internal"
+          peers { new Fragments.TlsPeer { namespace = "ns"; serviceAccount = "sa" } }
+        }
+      ) as Fragments.Tls,
+    ).length > 0
+    refuses(() -> new Fragments.TlsFields { mode = "mutual" })
+  }
+  ["platform: every field is optional, and the open parts stay open"] {
+    json(new Platform {}) == "{}"
+    json((Platform) { replicas = 2; volumes { new Dynamic { name = "v"; emptyDir {} } } }).length
+      > 0
+    refuses(() -> (Platform) { replicas = -1 })
+    refuses(() -> (Platform) { imagePullPolicy = "Sometimes" })
+    refuses(() -> (Platform) { image { repository = "r"; digest = "sha256:abc" } })
+    refuses(() -> (Platform) { image { tag = "1" } })
+    refuses(() -> (Platform) { podSecurity { runAsUser = 0 } })
+    refuses(() -> (Platform) { secrets { ["DB_PASSWORD"] { secretName = "s" } } })
+    refuses(() -> (Platform) { secrets { ["db-password"] { secretName = "s"; key = "k" } } })
+    refuses(() -> (Platform) { volumes { new Dynamic { mountPath = "/x" } } })
+    refuses(() -> (Platform) { bogus = 1 })
+  }
+  ["service config: probes are required, and a typo fails"] {
+    json(okProbes).length > 0
+    refuses(() -> new ServiceConfig {})
+    refuses(() -> (okProbes) { bogus = 1 })
+    refuses(() -> (okProbes) { log { level = "loud" } })
+    (okProbes) { log { level = "debug" }; drain { seconds = 30 } }.drain.seconds == 30
+  }
+  ["chart values: platform and config, and an absent platform is not a null"] {
+    local values = (ChartValues) {
+      config = okProbes
+      images { ["svc"] { repository = "example/svc" } }
+    }
+    !json(values).contains("null")
+    refuses(() -> (values) { bogus = 1 })
+    refuses(() -> (values) { config { probes { address = "7070" } } })
+    refuses(() -> (ChartValues) { config = okProbes; images { ["svc"] {} } })
+  }
+}

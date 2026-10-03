@@ -1,0 +1,16 @@
+// Not a package, and never published: the tests and the helpers they share.
+// It depends on the three packages by path, so a test runs against the files
+// in this checkout, not against a release.
+amends "pkl:Project"
+
+tests {
+  "ProbesTest.pkl"
+  "LintTest.pkl"
+  "ContractsTest.pkl"
+}
+
+dependencies {
+  ["vocab"] = import("../packages/vocab/PklProject")
+  ["fragments"] = import("../packages/fragments/PklProject")
+  ["templates"] = import("../packages/templates/PklProject")
+}
