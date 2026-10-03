@@ -19,14 +19,44 @@
 ///     refuses any of them (LF, CR, FF, VT, NEL, LS, PS);
 ///   - a default is any JSON value: an object default of an open object is a
 ///     plain `dict`, and one of a class is built through that class, so that it
-///     is the model and not a dictionary.
+///     is the model and not a dictionary;
+///   - a property whose name is not a usable attribute (`service-lib`, a Python
+///     keyword such as `global`, a leading underscore or digit) is declared
+///     under a safe name with
+///     `Field(alias="<name>")`, so the document's key is still the contract's.
 module contracts.python.Pydantic
 
 import "@model/Model.pkl"
 
+/// One character of a string written inside double quotes in source: a quote, a
+/// backslash and every control character or line separator (a raw line feed ends
+/// a TypeScript or Python string) as an escape both languages read alike.
+local function escapeChar(c: String): String =
+  if (c == "\\")
+    "\\\\"
+  else if (c == "\"")
+    "\\\""
+  else if (c == "\n")
+    "\\n"
+  else if (c == "\r")
+    "\\r"
+  else if (c == "\t")
+    "\\t"
+  else
+    let (cp = c.codePoints.first)
+      if (cp < 32 || (cp >= 127 && cp <= 159) || cp == 8232 || cp == 8233)
+        "\\u" + cp.toRadixString(16).padStart(4, "0")
+      else
+        c
+
+/// A string as a double-quoted literal.
+local function quote(v: String): String = "\"" + v.chars.map((c) -> escapeChar(c)).join("") + "\""
+
 local function lit(v: Any): String =
   if (v is String)
-    "\"\(v.replaceAll("\\", "\\\\").replaceAll("\"", "\\\""))\""
+    quote(v)
+  else if (v == null)
+    "None"
   else if (v is Boolean)
     (if (v) "True" else "False")
   else if (v is List)
@@ -36,7 +66,70 @@ local function lit(v: Any): String =
   else
     "\(v)"
 
+/// Words Python reserves: an attribute cannot be one.
+local keywords: Set<String> =
+  Set(
+    "False",
+    "None",
+    "True",
+    "and",
+    "as",
+    "assert",
+    "async",
+    "await",
+    "break",
+    "class",
+    "continue",
+    "def",
+    "del",
+    "elif",
+    "else",
+    "except",
+    "finally",
+    "for",
+    "from",
+    "global",
+    "if",
+    "import",
+    "in",
+    "is",
+    "lambda",
+    "nonlocal",
+    "not",
+    "or",
+    "pass",
+    "raise",
+    "return",
+    "try",
+    "while",
+    "with",
+    "yield",
+  )
+
+/// The name a property is declared under: its own when that is a usable
+/// attribute. A Python keyword gains a trailing underscore; anything else that is
+/// not a plain identifier, or that starts with an underscore (pydantic reads one
+/// as private and drops the field), is rewritten to one. Only a name that
+/// could not be an attribute at all, or would not be a field, is touched: a name
+/// that merely shadows something of `BaseModel`'s works and stays as it is.
+local function pyName(name: String): String =
+  if (name.matches(Regex("[A-Za-z][A-Za-z0-9_]*")))
+    if (keywords.contains(name)) "\(name)_" else name
+  else
+    let (safe = name.replaceAll(Regex("[^A-Za-z0-9_]"), "_"))
+      if (safe.matches(Regex("[A-Za-z].*")))
+        if (keywords.contains(safe)) "\(safe)_" else safe
+      else
+        "f" + (if (safe.startsWith("_")) safe else "_" + safe)
+
 local function rawStr(r: String): String = "r\"\(r.replaceAll("\"", "\\\""))\""
+
+/// A documentation comment as the body of a triple-quoted docstring: a backslash
+/// is doubled, a run of three quotes cannot be in it, and a quote at the very end
+/// would close the string one quote early.
+local function docstring(d: String): String =
+  let (e = d.replaceAll("\\", "\\\\").replaceAll("\"\"\"", "'''"))
+    if (e.endsWith("\"")) e.dropLast(1) + "\\\"" else e
 
 local function comment(d: String?, indent: String): String =
   if (d == null) "" else d.split("\n").map((l) -> "\(indent)#: \(l)\n").join("")
@@ -98,26 +191,53 @@ local function range(n: Model.Node): String =
       ),
     )))"
 
+/// `Field(...)` of a property: its default (or `None`, for an absent optional)
+/// and the alias its document key needs, or nothing when it needs neither.
+local function fieldCall(p: Model.Prop): String =
+  let (alias = if (pyName(p.name) == p.name) null else "alias=\(lit(p.name))")
+  let (
+    dflt =
+      if (p.hasDefault && p.type.kind == "object")
+        "default_factory=lambda: \(p.type.alias ?? p.type.cls.qname).model_validate(\(lit(p.default)))"
+      else if (p.hasDefault)
+        "default=\(lit(p.default))"
+      else if (!p.required)
+        "default=None"
+      else
+        null
+  )
+    if (alias == null)
+      if (dflt == null) "" else if (dflt == "default=None") " = None" else " = Field(\(dflt))"
+    else
+      " = Field(\(constraints(List(dflt, alias))))"
+
 local function field(p: Model.Prop): String =
   comment(p.doc, "    ")
-    + "    \(p.name): \(ann(p.type))\(if (!p.required && !p.hasDefault) " | None" else "")"
-    + (
-      if (p.hasDefault && p.type.kind == "object")
-        " = Field(default_factory=lambda: \(p.type.alias ?? p.type.cls.qname).model_validate(\(lit(p.default))))"
-      else if (p.hasDefault)
-        " = Field(default=\(lit(p.default)))"
-      else if (!p.required)
-        " = None"
-      else
-        ""
-    )
+    + "    \(pyName(p.name)): \(ann(p.type))\(if (!p.required && !p.hasDefault) " | None" else "")"
+    + fieldCall(p)
     + "\n"
 
+/// Two properties of one class that would be declared under one name.
+local function collisions(c: Model.Cls): List<String> =
+  c.props
+    .map((p) -> pyName(p.name))
+    .distinct
+    .filter((n) -> c.props.count((p) -> pyName(p.name) == n) > 1)
+    .map((n) ->
+      "\(c.qname): \(c.props.filter((p) -> pyName(p.name) == n).map((p) -> "`\(p.name)`").join(" and ")) are all `\(n)` in Python"
+    )
+
 local function classDef(c: Model.Cls): String =
+  if (!collisions(c).isEmpty)
+    throw(collisions(c).join("\n"))
+  else
+    classBody(c)
+
+local function classBody(c: Model.Cls): String =
   "class \(c.qname)(\(if (c.base != null) c.base.cls.qname else "_Closed")):\n"
     + (
       if (c.doc != null)
-        "    \"\"\"\(c.doc.replaceAll("\\", "\\\\").replaceAll("\"\"\"", "'''"))\"\"\"\n"
+        "    \"\"\"\(docstring(c.doc))\"\"\"\n"
       else
         ""
     )
@@ -140,8 +260,8 @@ local function classAliasDef(n: Model.Node): String =
       else
         "    @model_validator(mode=\"after\")\n"
           + "    def _conditional(self) -> \"\(n.alias)\":\n"
-          + "        if self.\(n.requiredWhen.property) in \(lit(n.requiredWhen.`in`.toList())):\n"
-          + "            missing = [k for k in \(lit(n.requiredWhen.require.toList())) if getattr(self, k) is None]\n"
+          + "        if self.\(pyName(n.requiredWhen.property)) in \(lit(n.requiredWhen.`in`.toList())):\n"
+          + "            missing = [k for k in \(lit(n.requiredWhen.require.toList().map((k) -> pyName(k)))) if getattr(self, k) is None]\n"
           + "            if missing:\n"
           + "                raise ValueError(f\"{missing} required when \(n.requiredWhen.property) is \(n.requiredWhen.`in`.join(" or "))\")\n"
           + "        return self\n"
