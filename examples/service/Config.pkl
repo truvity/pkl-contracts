@@ -1,0 +1,16 @@
+/// An example service that serves one listener and keeps a record in a
+/// PostgreSQL database. Its configuration is the service envelope (probes, log,
+/// drain) and what it needs of its own.
+@A.Schema { id = "https://example.com/echo/schemas/config.json"; title = "echo" }
+module example.Config
+
+extends "@templates/ServiceConfig.pkl"
+
+import "@fragments/Fragments.pkl" as F
+import "@vocab/Annotations.pkl" as A
+
+/// The listener the service's own traffic is served on.
+listen: F.Listen
+
+/// The database the service keeps its records in.
+postgres: F.Postgres

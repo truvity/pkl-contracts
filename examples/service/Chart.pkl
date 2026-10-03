@@ -1,0 +1,23 @@
+/// The values of the example service's chart: the platform block and the
+/// service's own configuration, and the one image it ships.
+@A.Chart { title = "echo chart values" }
+module example.Chart
+
+extends "@templates/ChartValues.pkl"
+
+import "@fragments/Platform.pkl"
+import "@vocab/Annotations.pkl" as A
+
+import "Config.pkl"
+
+/// The service's own configuration: exactly `Config`.
+config: Config
+
+/// The one image this chart ships.
+images: Images
+
+/// The images of this chart, by component.
+class Images {
+  /// The service's image.
+  echo: Platform.PlatformImage
+}

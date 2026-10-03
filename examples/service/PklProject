@@ -1,0 +1,10 @@
+// A worked example of a service's own contract. It depends on the packages by
+// path so that it builds from this checkout; a repository that consumes a
+// release depends on the release's package URIs instead (see the README).
+amends "pkl:Project"
+
+dependencies {
+  ["vocab"] = import("../../packages/vocab/PklProject")
+  ["fragments"] = import("../../packages/fragments/PklProject")
+  ["templates"] = import("../../packages/templates/PklProject")
+}
