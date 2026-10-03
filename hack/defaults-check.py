@@ -20,12 +20,22 @@ carry exactly those defaults:
 A default may be any value, an object included (an open object, or a class
 given a default of its own): each artifact must carry it whole.
 
+An object nobody sets has Pkl's own default, an instance built from its class's
+defaults. When every field of the class has a default, is nullable, or is such
+an object itself (the class is default-complete), the property is OPTIONAL and
+its default is that instance, rendered whole (a JSON Schema validator does not
+fill a default in); otherwise it stays required. The expectation of which is
+which is written by hand below (OPTIONAL_BLOCKS, REQUIRED_BLOCKS), and what the
+default is, is checked against the values.yaml Pkl itself renders.
+
 The same artifacts are checked for what a property that is SET AT INSTALL
 (`@SetAtInstall`) must look like: required by every schema and validator
 (a JSON Schema `required`, a zod field and a pydantic one without `optional`,
 `None` or a default, a docs row that says required and "Set at install"), and
 absent from values.yaml, where its object is present. A default for it would
-let an install that forgot it pass.
+let an install that forgot it pass. Each schema also marks it with
+`x-set-at-install: true`, and the reference has a "Set at install" column that
+says `yes`, so that a tool need not read the prose.
 
 It fails on a missing default, a different one, and one nobody declared. The
 directory defaults to examples/service/generated.
@@ -159,14 +169,17 @@ pyd_lines = {}
 # A class ends at the next class or module-level name, not at any line that starts
 # in column 0: a multi-line docstring has such lines.
 for m in re.finditer(r"^class (\w+)\(.*?\):\n(.*?)(?=^(?:class |SCHEMAS|EOF|\w+ = ))", py + "\nEOF", re.S | re.M):
-    pyd_lines[m.group(1)] = {f.group(1): f.group(0) for f in re.finditer(r"^    (\w+): .*$", m.group(2), re.M)}
+    # `Field(..., alias="service-lib")` names a key that is not an attribute; the
+    # alias is not a default, so it is taken off before a default is read.
+    body = re.sub(r', alias="[^"\n]*"\)$', ")", m.group(2), flags=re.M)
+    pyd_lines[m.group(1)] = {f.group(1): f.group(0) for f in re.finditer(r"^    (\w+): .*$", body, re.M)}
     # A default is `Field(default=<literal>)`; a class's is built through the class,
     # `Field(default_factory=lambda: <Class>.model_validate(<literal>))`.
     pyd[m.group(1)] = {
         f.group(1): ast.literal_eval(f.group(2) or f.group(3))
         for f in re.finditer(
             r"^    (\w+): .* = Field\((?:default=(.*)|default_factory=lambda: \w+\.model_validate\((.*)\))\)$",
-            m.group(2), re.M)
+            body, re.M)
     }
 
 # ---- docs table -------------------------------------------------------------
@@ -226,6 +239,106 @@ for qname, names in expected["classesAtInstall"].items():
         rows = [r for r in re.findall(rf"^\| `{name}` \|.*$", next(iter(re.findall(rf"^### `{qname}`\n(.*?)(?=^#|\Z)", md, re.S | re.M)), ""), re.M)]
         if not rows or "| yes |" not in rows[0] or "Set at install" not in rows[0]:
             problems.append(f"docs table: {where} is set at install and its row must say so: {rows[:1]}")
+
+# ---- an object nobody sets -------------------------------------------------
+
+# Written by hand, so that the expectation does not come from the model it checks.
+# `Config.client` and the `retry` in it have a default for every field (or are
+# nullable): Pkl builds them, so they are optional and carry that instance.
+# `Config.listen` and `Config.postgres` have a field with no default: required.
+OPTIONAL_BLOCKS = {"ConfigClient": ["retry"], "Config": ["client"]}
+REQUIRED_BLOCKS = {"Config": ["listen", "postgres"], "ServiceConfig": ["probes"]}
+
+
+def class_schema(doc: dict, path: list):
+    node = doc
+    for part in path:
+        node = node["properties"][part]
+    return node
+
+
+config_schema = json.loads((gen / "schemas/config.json").read_text())
+config_values = values_schema["$defs"]["https://example.com/echo/schemas/config.json"]
+for where, root in (("schemas/config.json", config_schema), ("helm/values.schema.json", config_values)):
+    for path, name, optional in (([], "client", True), (["client"], "retry", True), ([], "listen", False), ([], "postgres", False)):
+        checked += 1
+        holder = class_schema(root, path) if path else root
+        prop = holder["properties"][name]
+        in_required = name in holder.get("required", [])
+        if optional and (in_required or "default" not in prop):
+            problems.append(f"{where}: `{'.'.join(path + [name])}` has a default for every field and must be optional with its default (required={in_required}, default={prop.get('default')})")
+        if not optional and (not in_required or "default" in prop):
+            problems.append(f"{where}: `{'.'.join(path + [name])}` has a field without a default and must be required, with none")
+# The chart's values: the block is there, whole, because Pkl rendered it.
+checked += 1
+if values.get("config", {}).get("client") != {"timeoutSeconds": 5, "retry": {"attempts": 3, "idempotentOnly": True}}:
+    problems.append(f"helm/values.yaml: config.client is not the instance Pkl builds: {canon(values.get('config', {}).get('client'))}")
+
+for qname, names in OPTIONAL_BLOCKS.items():
+    for name in names:
+        checked += 1
+        where = f"`{qname}.{name}`"
+        z = zod_lines.get(qname, {}).get(name, "")
+        if ".default(" not in z or ".optional()" in z:
+            problems.append(f"zod: {where} is a default-complete block and must have its default: {z}")
+        y = pyd_lines.get(qname, {}).get(name, "")
+        if "default_factory=" not in y:
+            problems.append(f"pydantic: {where} is a default-complete block and must have a default_factory: {y}")
+        sect = next(iter(re.findall(rf"^### `{qname}`\n(.*?)(?=^#|\Z)", md, re.S | re.M)), "")
+        rows = re.findall(rf"^\| `{name}` \|.*$", sect, re.M)
+        if not rows or "| no |" not in rows[0]:
+            problems.append(f"docs table: {where} is a default-complete block and its row must say it is not required: {rows[:1]}")
+
+for qname, names in REQUIRED_BLOCKS.items():
+    for name in names:
+        checked += 1
+        where = f"`{qname}.{name}`"
+        z = zod_lines.get(qname, {}).get(name)
+        if z is None or ".optional()" in z or ".default(" in z:
+            problems.append(f"zod: {where} has a field without a default and must be required: {z}")
+        y = pyd_lines.get(qname, {}).get(name)
+        if y is None or "None" in y or "Field(" in y:
+            problems.append(f"pydantic: {where} has a field without a default and must be required: {y}")
+        sect = next(iter(re.findall(rf"^### `{qname}`\n(.*?)(?=^#|\Z)", md, re.S | re.M)), "")
+        rows = re.findall(rf"^\| `{name}` \|.*$", sect, re.M)
+        if not rows or "| yes |" not in rows[0]:
+            problems.append(f"docs table: {where} has a field without a default and its row must say it is required: {rows[:1]}")
+
+# ---- the structured marker of a value set at install --------------------------
+
+def marked(schema_node) -> list:
+    """(property, schema) of every property that carries `x-set-at-install`."""
+    out = []
+    if isinstance(schema_node, dict):
+        props = schema_node.get("properties")
+        if isinstance(props, dict):
+            out += [name for name, sub in props.items() if isinstance(sub, dict) and sub.get("x-set-at-install") is True]
+        for k, v in schema_node.items():
+            out += marked(v)
+    elif isinstance(schema_node, list):
+        for v in schema_node:
+            out += marked(v)
+    return out
+
+
+want_marked = sorted({n for names in expected["classesAtInstall"].values() for n in names})
+for where, node in (("schemas/config.json", config_schema), ("helm/values.schema.json", values_schema)):
+    checked += 1
+    got = sorted(set(marked(node)))
+    if want_marked and not set(want_marked) <= set(got):
+        problems.append(f"{where}: `x-set-at-install` is missing on {sorted(set(want_marked) - set(got))}")
+    for name in got:
+        if name not in want_marked:
+            problems.append(f"{where}: `x-set-at-install` is on `{name}`, which is not set at install")
+
+for qname, names in expected["classesAtInstall"].items():
+    sect = next(iter(re.findall(rf"^### `{qname}`\n(.*?)(?=^#|\Z)", md, re.S | re.M)), "")
+    for r in re.finditer(r"^\| `(\w+)` \|(.*)$", sect, re.M):
+        checked += 1
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", r.group(0))[1:-1]]
+        marker = cells[-1] if len(cells) == 7 else None
+        if (marker == "yes") != (r.group(1) in names):
+            problems.append(f"docs table: `{qname}.{r.group(1)}` has the column 'Set at install' = {marker!r}, and it {'is' if r.group(1) in names else 'is not'} set at install")
 
 if checked == 0:
     problems.append("no default was checked: the contract declares none, or the check reads nothing")

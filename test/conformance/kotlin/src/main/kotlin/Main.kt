@@ -47,7 +47,7 @@ fun main(args: Array<String>) {
             // the other half is the schema's. `platform` has union types, which the
             // generator refuses, so it has no class.
             val schema = e["schema"].asText()
-            if (!e["typed"].asBoolean() || schema == "platform") continue
+            if (!e["typed"].asBoolean() || schema == "platform" || schema == "union") continue
             if (!schemaOk) { line(id, "kotlin", false, verdict.getOrNull()?.second ?: "schema error"); continue }
             val src = """
                 import "pkl:yaml"
@@ -68,6 +68,10 @@ fun main(args: Array<String>) {
                     "log" -> cfg.to<LogArchiver>()
                     "shortener" -> cfg.to<Shortener>()
                     "installed" -> cfg.to<Installed>()
+                    "blocks" -> cfg.to<Blocks>()
+                    "inherit" -> cfg.to<Inherit>()
+                    "names" -> cfg.to<Names>()
+                    "literals" -> cfg.to<Literals>()
                     "showcase" -> cfg.to<Showcase>()
                     else -> error("no generated class for $schema")
                 }

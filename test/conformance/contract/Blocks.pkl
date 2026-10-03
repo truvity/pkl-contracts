@@ -1,0 +1,106 @@
+/// Blocks a document may leave out, and blocks it may not. Pkl gives an object
+/// property that nobody sets an instance of its class built from the class's own
+/// defaults, so a block whose class is default-complete (every property has a
+/// default, is nullable, or is itself such a block) is optional, and its
+/// default is that instance. A block with a field that has no default, or that
+/// is set at install, or an open object that must carry keys, is required.
+@A.Schema { id = "https://example.com/schemas/blocks.json"; title = "blocks" }
+module conformance.contract.Blocks
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+// ------------------------------------------------------------------- optional
+
+/// Default-complete: a default for the scalar, a default-complete block inside,
+/// and the nullable, list, map and open-object kinds, none of which need a value.
+client: Client
+
+/// Default-complete only through the block inside it, which is.
+holder: Holder
+
+/// An open object: Pkl's default is the empty one.
+labels: V.OpenObject
+
+/// Default-complete, but given a default of its own that differs from the class's.
+cache: Cache = new Cache { ttl = 60 }
+
+// ------------------------------------------------------------------- required
+
+/// Not default-complete: `host` has no default.
+upstream: Upstream
+
+/// Not default-complete: the token is set at install.
+vault: Vault
+
+/// Not default-complete, through the block inside it, whose token is set at install.
+wrapped: Wrapped
+
+/// Not default-complete, through the block inside it, whose `host` has no default.
+deep: Deep
+
+/// An open object that must carry a `name`: the empty one does not.
+volume: V.Named
+
+/// Default-complete.
+class Client {
+  /// How long one call may take, in seconds.
+  timeoutSeconds: V.PositiveInt = 5
+  /// What is tried again.
+  retry: Retry
+  /// A proxy; absent means none.
+  proxy: V.NonEmptyString?
+  /// Extra headers, name to value.
+  headers: Mapping<String, String>
+  /// Hosts that are not called.
+  skip: Listing<String>
+  /// Whatever else the client is told, passed through.
+  extra: V.OpenObject
+}
+
+/// Default-complete.
+class Retry {
+  /// How many attempts in all.
+  attempts: V.PositiveInt = 3
+  /// The lowest level the retries log at.
+  level: V.LogLevel = "info"
+}
+
+/// Default-complete through `client`.
+class Holder {
+  /// The block inside.
+  client: Client
+}
+
+/// Default-complete, so that a default of its own can differ.
+class Cache {
+  /// Seconds an entry lives.
+  ttl: V.PositiveInt = 30
+}
+
+/// Not default-complete.
+class Upstream {
+  /// The host. Every document names one.
+  host: V.NonEmptyString
+  /// The port.
+  port: V.Port = 443
+}
+
+/// Not default-complete.
+class Vault {
+  /// The token. Every install supplies its own.
+  @A.SetAtInstall
+  token: V.NonEmptyString?
+}
+
+/// Not default-complete, through `vault`.
+class Wrapped {
+  /// The vault.
+  vault: Vault
+}
+
+/// Not default-complete, through `upstream`.
+class Deep {
+  /// The upstream.
+  upstream: Upstream
+}

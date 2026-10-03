@@ -94,11 +94,11 @@ class Defaults {
   bucket: V.NonEmptyString?
   /// An open object with a default.
   resources: V.OpenObject = new Dynamic { requests { cpu = "50m" } }
-  /// An open object without one.
+  /// An open object without one: the empty one.
   extra: V.OpenObject
   /// A class with a default of its own.
   limits: Limits = new Limits { cpu = "2" }
-  /// A class whose default is exactly the class's own: no default.
+  /// A class whose default is exactly the class's own: Pkl's, since every field has one.
   plain: Limits
 }
 

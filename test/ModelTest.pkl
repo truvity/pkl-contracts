@@ -1,0 +1,86 @@
+/// What the model says about a property: whether a document must carry it and
+/// what it defaults to. The case that needs care is an object. Pkl gives an
+/// object property nobody sets an instance of its class built from the class's
+/// own defaults, so the property is optional when that instance is valid
+/// (the class is default-complete), and its default is that instance, rendered
+/// whole, because a JSON Schema validator does not fill a default in.
+///
+/// The contracts are the conformance suite's (`conformance/contract`), which
+/// every validator is also run against.
+amends "pkl:test"
+
+import "@model/Model.pkl"
+
+import "conformance/contract/Blocks.pkl"
+import "conformance/contract/Inherit.pkl"
+import "conformance/contract/Names.pkl"
+
+local blocks = Model.moduleNode(Blocks)
+local inherit = Model.moduleNode(Inherit)
+local names = Model.moduleNode(Names)
+
+local function prop(root: Model.Node, name: String): Model.Prop =
+  root.cls.props.find((p) -> p.name == name)
+
+local clientDefault =
+  Map(
+    "timeoutSeconds", 5,
+    "retry", Map("attempts", 3, "level", "info"),
+    "headers", Map(),
+    "skip", List(),
+    "extra", Map(),
+  )
+
+facts {
+  ["a default-complete block is optional, and its default is the class's own, nested blocks included"] {
+    prop(blocks, "client").required == false
+    prop(blocks, "client").hasDefault
+    prop(blocks, "client").default == clientDefault
+    prop(blocks, "holder").required == false
+    prop(blocks, "holder").default == Map("client", clientDefault)
+  }
+  ["a nullable field, a list, a map and an open object need no value inside such a block"] {
+    // `proxy` is nullable, so it is absent from the default, not null in it.
+    !prop(blocks, "client").type.cls.props.find((p) -> p.name == "proxy").required
+    !prop(blocks, "client").default.containsKey("proxy")
+  }
+  ["an open object is optional, with the empty one"] {
+    prop(blocks, "labels").required == false
+    prop(blocks, "labels").default == Map()
+  }
+  ["a default the contract wrote wins over the class's own"] {
+    prop(blocks, "cache").required == false
+    prop(blocks, "cache").default == Map("ttl", 60)
+  }
+  ["a block with a field that has no default is required, however deep"] {
+    prop(blocks, "upstream").required
+    !prop(blocks, "upstream").hasDefault
+    prop(blocks, "deep").required
+    !prop(blocks, "deep").hasDefault
+  }
+  ["a block with a field set at install is not default-complete, however deep"] {
+    prop(blocks, "vault").required
+    !prop(blocks, "vault").hasDefault
+    prop(blocks, "wrapped").required
+    !prop(blocks, "wrapped").hasDefault
+    // The field itself stays required and defaultless.
+    prop(blocks, "vault").type.cls.props.first.setAtInstall
+    prop(blocks, "vault").type.cls.props.first.required
+  }
+  ["an open object that must carry a key is required: the empty one is not valid"] {
+    prop(blocks, "volume").required
+    !prop(blocks, "volume").hasDefault
+  }
+  ["what a class inherits counts: its defaults, and its fields without one"] {
+    prop(inherit, "derived").type.cls.props.map((p) -> p.name) == List("fromBase", "own")
+    prop(inherit, "derived").required == false
+    prop(inherit, "derived").default == Map("fromBase", 1, "own", 2)
+    prop(inherit, "chain").default == Map("fromBase", 1, "own", 2, "last", 3)
+    prop(inherit, "needs").required
+    !prop(inherit, "needs").hasDefault
+  }
+  ["a name that is not an identifier keeps its key in the model"] {
+    names.cls.props.map((p) -> p.name).contains("service-lib")
+    prop(names, "max-block").default == Map("max-size", 10)
+  }
+}

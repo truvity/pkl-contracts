@@ -1,0 +1,3 @@
+service-lib: lib
+gate:
+  the-mode: secure

@@ -1,0 +1,10 @@
+needs:
+  name: svc
+  size: 4
+derived:
+  fromBase: 10
+  own: 20
+chain:
+  fromBase: 10
+  own: 20
+  last: 30

@@ -1,0 +1,9 @@
+upstream:
+  host: db.example.com
+vault:
+  token: abc
+deep:
+  upstream:
+    host: db.example.com
+volume:
+  name: data

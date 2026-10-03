@@ -1,0 +1,31 @@
+upstream:
+  host: db.example.com
+vault:
+  token: abc
+wrapped:
+  vault:
+    token: abc
+deep:
+  upstream:
+    host: db.example.com
+volume:
+  name: data
+client:
+  timeoutSeconds: 9
+  retry:
+    attempts: 5
+    level: warn
+  proxy: proxy.example.com:3128
+  headers:
+    x-trace: "1"
+  skip:
+    - a.example.com
+  extra:
+    anything: goes
+holder:
+  client:
+    timeoutSeconds: 2
+labels:
+  team: platform
+cache:
+  ttl: 5

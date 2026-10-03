@@ -1,0 +1,49 @@
+/// Values that are awkward to write as source in a language that is not Pkl: a
+/// default with a line break, a quote, a backslash or a bar in it, an enum
+/// member with a quote, a documentation comment that ends in a quote, a map
+/// keyed by an enum, and a float. Every artifact must be loadable, say the same
+/// thing, and Pkl's own reading is the oracle.
+@A.Schema { id = "https://example.com/schemas/literals.json"; title = "literals" }
+module conformance.contract.Literals
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// A default that spans two lines.
+multiline: String = "first\nsecond"
+
+/// A default with a tab, a carriage return and a form feed.
+spaced: String = "a\tb\rc\u{C}d"
+
+/// A default with quotes and a backslash.
+quoted: String = "say \"hi\" \\ bye"
+
+/// A default with a bar and a backtick, which a Markdown table reads as syntax.
+tabular: String = "left|right `code`"
+
+/// A default with the line and paragraph separators.
+separated: String = "x\u{2028}y\u{2029}z"
+
+/// A default with a character that is not ASCII.
+accented: String = "café ☕"
+
+/// An enum member that has a quote in it.
+choice: ("a\"b" | "c")?
+
+/// A map keyed by an enum: only the levels it names, and each at most once.
+levels: Mapping<V.LogLevel, V.PositiveInt>?
+
+/// A float, as a default.
+weight: Float = 1.5
+
+/// A float, left to the document.
+ratio: Float?
+
+/// A block whose class documentation ends in a quote.
+quoteDoc: QuoteDoc
+
+/// Ends in a quote: it is called "the end"
+class QuoteDoc {
+  /// Fine.
+  size: V.PositiveInt = 1
+}

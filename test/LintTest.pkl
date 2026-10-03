@@ -164,17 +164,22 @@ facts {
       .catch(() -> Model.declNode(LintFixtures, "EmptyBound").cls.props.first.type.range)
       .contains("leave no value")
   }
-  ["an object's default is the property's own only when it differs from the class's"] {
+  ["an object's default is the property's own when it differs from the class's, and Pkl's when it does not"] {
     local props = Model.declNode(LintFixtures, "Defaults").cls.props
     props.find((p) -> p.name == "resources").hasDefault
     props.find((p) -> p.name == "resources").default == Map("requests", Map("cpu", "50m"))
     !props.find((p) -> p.name == "resources").required
-    !props.find((p) -> p.name == "extra").hasDefault
-    props.find((p) -> p.name == "extra").required
+    // An open object nobody sets is the empty one: optional, and that is its default.
+    props.find((p) -> p.name == "extra").hasDefault
+    props.find((p) -> p.name == "extra").default == Map()
+    !props.find((p) -> p.name == "extra").required
     props.find((p) -> p.name == "limits").hasDefault
     props.find((p) -> p.name == "limits").default == Map("cpu", "2", "memory", "1Gi")
-    !props.find((p) -> p.name == "plain").hasDefault
-    props.find((p) -> p.name == "plain").required
+    // A class whose default is exactly its own, and whose fields all have one:
+    // optional, with the instance Pkl builds.
+    props.find((p) -> p.name == "plain").hasDefault
+    props.find((p) -> p.name == "plain").default == Map("cpu", "1", "memory", "1Gi")
+    !props.find((p) -> p.name == "plain").required
   }
   ["the line breaks the vocabulary refuses and the ones the generators guard are the same"] {
     Vocab.lineBreaks == Model.lineBreaks

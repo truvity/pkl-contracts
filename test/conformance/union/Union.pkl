@@ -1,0 +1,18 @@
+/// A property that is one of several shapes, a list among them: the schema must
+/// check the items of the list as the contract's own type does, not only that
+/// it is an array. Kept apart from `contract/` because the Kotlin generator
+/// refuses a union type, as it does for the platform block.
+@A.Schema { id = "https://example.com/schemas/union.json"; title = "union" }
+module conformance.union.Union
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// One name, or several.
+names: (Listing<V.NonEmptyString> | V.NonEmptyString)?
+
+/// A number, or a list of whole numbers.
+sizes: (Listing<Int> | Number)?
+
+/// A string, or a map of strings.
+labels: (Mapping<String, String> | String)?
