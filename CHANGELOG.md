@@ -7,6 +7,8 @@ under one version, so a heading covers all of them.
 
 ## Unreleased
 
+## v0.4.0 — 2026-10-04
+
 ### Features
 
 This minor adds vocabulary and annotation features and narrows one vocabulary type
