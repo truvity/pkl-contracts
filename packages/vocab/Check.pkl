@@ -1,0 +1,123 @@
+/// Pkl's enforcement of the constraints a PROPERTY carries as an annotation
+/// (`@A.Range`, `@A.Length` on a property, narrowing the vocabulary type it
+/// has).
+///
+/// Pkl has nowhere to put such a rule. A constraint belongs to a TYPE, and a type
+/// cannot read the annotation of the property it is the type of; a class cannot
+/// carry an invariant either. So the rule is enforced the one way Pkl allows: a
+/// function that reflects over a value, finds the annotations on the properties
+/// of every object in it, and compares each property's value with them. It is
+/// written once, here, and the annotation stays the only place a contract states
+/// the bound, so the generators and Pkl read the same words and cannot disagree.
+///
+/// `checked` is what runs it:
+///
+///   - the contract templates (`ServiceConfig`, `ChartValues`) call it in their
+///     `output`, so that evaluating or rendering a document that breaks a bound
+///     fails, with the path of the value and the bound;
+///   - the chart generator calls it on the values it renders as `values.yaml`;
+///   - the test loader (`test/Load.pkl`), the oracle of the conformance suite,
+///     calls it on every document it loads.
+///
+/// A module that does not extend a template calls it itself:
+/// `output { value = Check.checked(module) }`.
+///
+/// Only the bounds are checked here. A type's own constraint (an alias) is
+/// Pkl's own, and a property that is `null` is absent and has nothing to check.
+module contracts.vocab.Check
+
+import "pkl:reflect"
+
+/// Whether annotation `a` is the vocabulary's `name`. By name and module, never
+/// `is`: a class has one identity per package URI, and a contract and a template
+/// may each reach the vocabulary through their own route.
+local function named(a: Annotation, name: String): Boolean =
+  let (c = reflect.Class(a.getClass()))
+    c.name == name && c.enclosingDeclaration.name == "contracts.vocab.Annotations"
+
+local function visible(p: reflect.Property): Boolean =
+  !p.modifiers.contains("hidden") && !p.modifiers.contains("local")
+
+local function rangeProblems(a: Dynamic, x: Number, path: String): List<String> =
+  (
+    if (a.min != null && x < a.min)
+      List("`\(path)` is \(x), below the least value \(a.min) its annotation allows")
+    else
+      List()
+  )
+    + (
+      if (a.max != null && x > a.max)
+        List("`\(path)` is \(x), above the greatest value \(a.max) its annotation allows")
+      else
+        List()
+    )
+
+local function lengthProblems(a: Dynamic, x: String, path: String): List<String> =
+  (
+    if (a.min != null && x.length < a.min)
+      List("`\(path)` has \(x.length) characters, fewer than the \(a.min) its annotation requires")
+    else
+      List()
+  )
+    + (
+      if (a.max != null && x.length > a.max)
+        List("`\(path)` has \(x.length) characters, more than the \(a.max) its annotation allows")
+      else
+        List()
+    )
+
+/// What property `p`'s own annotations say is wrong with its value `x`.
+local function own(p: reflect.Property, x: Any, path: String): List<String> =
+  if (x == null)
+    List()
+  else
+    p.annotations.flatMap((a) ->
+      if (named(a, "Range") && x is Number)
+        rangeProblems(a.toDynamic(), x, path)
+      else if (named(a, "Length") && x is String)
+        lengthProblems(a.toDynamic(), x, path)
+      else
+        List()
+    )
+
+local function walk(v: Any, path: String): List<String> =
+  if (v == null)
+    List()
+  else if (v is Listing || v is List)
+    (if (v is Listing) v.toList() else v).mapIndexed((i, e) -> walk(e, "\(path)[\(i)]")).flatten()
+  else if (v is Mapping || v is Map)
+    (if (v is Mapping) v.toMap() else v).entries.flatMap((e) ->
+      walk(e.second, "\(path)[\(e.first)]")
+    )
+  else if (v is Dynamic)
+    v.toMap().entries.flatMap((e) -> walk(e.second, join(path, e.first.toString())))
+      + v.toList().mapIndexed((i, e) -> walk(e, "\(path)[\(i)]")).flatten()
+  else if (v is Typed)
+    let (c = reflect.Class(v.getClass()))
+      c.allProperties
+        .toMap()
+        .filter((_, p) -> visible(p))
+        .entries
+        .flatMap((e) ->
+          let (x = v.getProperty(e.first))
+          let (at = join(path, e.first))
+            own(e.second, x, at) + walk(x, at)
+        )
+  else
+    List()
+
+local function join(path: String, name: String): String =
+  if (path == "") name else "\(path).\(name)"
+
+/// Everything wrong in `v` and in the objects below it: one sentence for each
+/// property whose value is outside its `@Range` or `@Length`.
+function problems(v: Any): List<String> = walk(v, "")
+
+/// `v` itself when no property's bound is broken; otherwise an error naming every
+/// one that is. Written to be the `value` of a module's `output`.
+function checked(v: Any): Any =
+  let (ps = problems(v))
+    if (ps.isEmpty)
+      v
+    else
+      throw("a value is outside the bound its property declares:\n  " + ps.join("\n  "))

@@ -13,20 +13,16 @@
 /// values rather than a document of its own.
 open module contracts.templates.ChartValues
 
+import "@fragments/Fragments.pkl" as F
 import "@fragments/Platform.pkl"
-import "@vocab/Vocab.pkl" as V
+import "@vocab/Check.pkl"
 
 import "ServiceConfig.pkl"
 
 /// Not a value: Helm puts a key named for every sub-chart into the values it
-/// validates, and the library chart is one.
-class ServiceLib {
-  /// Helm's own `global` block, passed through unchanged.
-  global: V.OpenObject?
-}
-
-/// Not a value: see `ServiceLib`.
-`service-lib`: ServiceLib?
+/// validates, and the library chart is one. `F.ServiceLib`, in the fragments, so
+/// that a chart that does not extend this module can use it too.
+`service-lib`: F.ServiceLib?
 
 /// What the platform provides this component: image, replicas, account,
 /// probes, identity, secrets, telemetry. Absent means the library's defaults.
@@ -39,3 +35,11 @@ config: ServiceConfig
 /// The image of each component, by name; a release stamps it. A chart narrows
 /// this to the components it has.
 images: Mapping<String, Platform.PlatformImage>
+
+/// How the module renders: the module itself, once checked against the bounds its
+/// properties carry.
+output {
+  // Rendering the values checks the bounds the properties carry (`@A.Range`,
+  // `@A.Length` on a property), which Pkl cannot see in a type.
+  value = Check.checked(module)
+}

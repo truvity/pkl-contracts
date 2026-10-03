@@ -156,3 +156,13 @@ typealias Tls =
   TlsFields(
     mode == "off" || (certFile != null && keyFile != null && caFile != null && trustDomain != null),
   )
+
+/// Not a value: Helm puts a key named for every sub-chart into the values it
+/// validates, and the library chart a service chart renders its components with
+/// is one. It takes no values of its own beyond Helm's `global` block. Declare it
+/// as `` `service-lib`: F.ServiceLib? `` in a chart's values; a chart that extends
+/// `ChartValues` already has it.
+class ServiceLib {
+  /// Helm's own `global` block, passed through unchanged.
+  global: V.OpenObject?
+}
