@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "resolvedDependencies": {
+    "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.templates@0": {
+      "type": "local",
+      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.templates@0.1.0",
+      "path": "../packages/templates"
+    },
+    "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.vocab@0": {
+      "type": "local",
+      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.vocab@0.1.0",
+      "path": "../packages/vocab"
+    },
+    "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.fragments@0": {
+      "type": "local",
+      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.fragments@0.1.0",
+      "path": "../packages/fragments"
+    }
+  }
+}

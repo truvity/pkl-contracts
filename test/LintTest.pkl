@@ -1,0 +1,108 @@
+/// The authoring rules of a contract, checked by reflection.
+///
+/// What Pkl's reflection can see, it checks here: every declaration is
+/// documented, and no field is both optional and defaulted. What it cannot see
+/// (a constraint written outside the vocabulary, a stray `null`) is checked on
+/// the source by `hack/lint.sh`.
+///
+/// The rules, from decision 0010 of the policy repository:
+///
+///   - there are no undocumented fields: a field's comment is its reference
+///     documentation, and the generators publish it;
+///   - a field with a default is optional, and an optional field is absent or
+///     present with a value, so a nullable field never carries a default (the
+///     two would say "optional" twice, and disagree about `null`).
+amends "pkl:test"
+
+import "pkl:reflect"
+
+import "@fragments/Fragments.pkl"
+import "@fragments/Platform.pkl"
+import "@templates/ChartValues.pkl"
+import "@templates/ServiceConfig.pkl"
+import "@vocab/Annotations.pkl"
+import "@vocab/Vocab.pkl"
+
+/// Every module of the packages. The list is the module graph, because
+/// `pkl:reflect` cannot enumerate one; the first fact refuses a module that is
+/// missing from it.
+local modules: Map<String, reflect.Module> =
+  Map(
+    "Annotations.pkl", reflect.Module(Annotations),
+    "Vocab.pkl", reflect.Module(Vocab),
+    "Fragments.pkl", reflect.Module(Fragments),
+    "Platform.pkl", reflect.Module(Platform),
+    "ServiceConfig.pkl", reflect.Module(ServiceConfig),
+    "ChartValues.pkl", reflect.Module(ChartValues),
+  )
+
+local function documented(d: reflect.Declaration): Boolean =
+  d.docComment != null && d.docComment.trim().length > 0
+
+local function visible(p: reflect.Property): Boolean =
+  !p.modifiers.contains("hidden") && !p.modifiers.contains("local")
+
+local function propertyProblems(where: String, props: Map<String, reflect.Property>): List<String> =
+  props
+    .toMap()
+    .filter((_, p) -> visible(p))
+    .toMap()
+    .entries
+    .flatMap((e) ->
+      (if (documented(e.second)) List() else List("\(where).\(e.first) has no doc comment"))
+        + (
+          if (e.second.type is reflect.NullableType && e.second.defaultValue != null)
+            List(
+              "\(where).\(e.first) is nullable and has a default: a default already makes a field optional",
+            )
+          else
+            List()
+        )
+    )
+
+local problems: List<String> =
+  modules
+    .toMap()
+    .entries
+    .flatMap((m) ->
+      let (file = m.first)
+      let (mod = m.second)
+        (if (documented(mod)) List() else List("\(file) has no module doc comment"))
+          + propertyProblems(file, mod.moduleClass.properties)
+          + mod.classes
+            .toMap()
+            .entries
+            .flatMap((c) ->
+              (
+                if (documented(c.second))
+                  List()
+                else
+                  List("\(file) class \(c.first) has no doc comment")
+              )
+                + propertyProblems("\(file) class \(c.first)", c.second.properties)
+            )
+          + mod.typeAliases
+            .toMap()
+            .entries
+            .flatMap((a) ->
+              if (documented(a.second))
+                List()
+              else
+                List("\(file) alias \(a.first) has no doc comment")
+            )
+    )
+
+local sources: Set<String> =
+  read*("../packages/*/*.pkl").keys.map((uri) -> uri.split("/").last).toSet()
+
+facts {
+  ["the lint knows every module of the packages"] {
+    sources == modules.keys.toSet()
+      || throw(
+        "modules on disk: \(sources.toList().sort()); modules in LintTest.pkl: \(modules.keys.toList().sort())"
+      )
+  }
+  ["every declaration is documented and no nullable field has a default"] {
+    problems.isEmpty || throw("\n" + problems.join("\n"))
+  }
+}

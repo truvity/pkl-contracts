@@ -1,0 +1,113 @@
+/// Boundary probes for the vocabulary, generated from the annotations.
+///
+/// Each alias is probed at and just outside its range, at and just under its
+/// minimum length, with its pattern's own examples, with every enum member and
+/// one that is not, and with a value of the wrong type. A pattern is probed one
+/// more way: each valid example with a newline at its end and at its start must
+/// be refused, because no pattern may admit one.
+///
+/// The expectation comes from the ANNOTATION. `ProbesTest.pkl` runs each probe
+/// against Pkl's own enforcement, so an alias whose lambda and annotation
+/// disagree fails there.
+///
+/// Ported from the spike's `gen/Probes.pkl`, which also wrote each probe out as
+/// a JSON document for the other validators; that half belongs to the
+/// generators.
+module contracts.test.Probes
+
+import "Model.pkl"
+
+/// One probe: whether the value should be accepted, and the value.
+class Probe {
+  /// `ok` or `bad`.
+  label: "ok" | "bad"
+
+  /// What the probe is for, for a failure message.
+  why: String
+
+  /// The value to give the property.
+  value: Any
+}
+
+local function ok(reason: String, v: Any): Probe = new { label = "ok"; why = reason; value = v }
+local function bad(reason: String, v: Any): Probe = new { label = "bad"; why = reason; value = v }
+
+/// An object with each of `names` set, except `omit`.
+local function keys(names: List<String>, omit: String?): Dynamic = new Dynamic {
+  for (k in names) {
+    when (k != omit) { [k] = "x" }
+  }
+}
+
+/// The probes of one property's type.
+function probesOf(n: Model.Node): List<Probe> =
+  (
+    if (n.range != null)
+      (if (n.range.min != null) List(ok("range minimum", n.range.min)) else List())
+        + (if (n.range.max != null) List(ok("range maximum", n.range.max)) else List())
+        + (if (n.range.min != null) List(bad("below the range", n.range.min - 1)) else List())
+        + (if (n.range.max != null) List(bad("above the range", n.range.max + 1)) else List())
+        + List(bad("a string for a number", "1"))
+    else
+      List()
+  )
+    + (
+      if (n.length != null && n.length.min != null)
+        List(
+          ok("minimum length", "x".repeat(n.length.min)),
+          bad("under the minimum length", "x".repeat(n.length.min - 1)),
+        )
+      else
+        List()
+    )
+    + (
+      if (n.pattern != null)
+        n.pattern.valid.toList().map((v) -> ok("valid example", v))
+          + n.pattern.invalid.toList().map((v) -> bad("invalid example", v))
+          + n.pattern.valid.toList().map((v) -> bad("valid example, then a newline", v + "\n"))
+          + n.pattern.valid.toList().map((v) -> bad("a newline, then valid example", "\n" + v))
+      else
+        List()
+    )
+    + (
+      if (n.kind == "enum")
+        n.values.map((v) -> ok("enum member", v))
+          + List(bad("not a member", "not-a-member"), bad("a number for an enum", 1))
+      else
+        List()
+    )
+    + (
+      if (n.kind == "string" && n.pattern == null && n.length == null)
+        List(bad("a number for a string", 1))
+      else
+        List()
+    )
+    + (
+      if (n.kind == "open" && n.requiresKeys != null)
+        List(ok("every required key", keys(n.requiresKeys.keys.toList(), null)))
+          + n.requiresKeys.keys
+            .toList()
+            .map((k) -> bad("without `\(k)`", keys(n.requiresKeys.keys.toList(), k)))
+          + List(bad("an empty object", new Dynamic {}))
+      else
+        List()
+    )
+    + (
+      if (n.kind == "open" && n.requiresKeys == null)
+        List(ok("an empty object", new Dynamic {}), ok("any keys", new Dynamic { anything = 1 }))
+      else
+        List()
+    )
+    + (
+      if (n.kind == "integer" && n.range == null)
+        List(ok("an integer", 3), bad("a string for an integer", "3"))
+      else
+        List()
+    )
+
+/// Property name to its probes, for a module whose properties are all aliases.
+function of(root: Model.Node): Mapping<String, List<Probe>> = new {
+  for (p in root.cls.props) {
+    [p.name] = probesOf(p.type)
+  }
+}
