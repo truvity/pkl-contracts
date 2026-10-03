@@ -5,6 +5,47 @@ per tag. The prose bullets are written for a consumer; the commit subjects under
 them are the GitHub Release's own list. All packages are released together
 under one version, so a heading covers all of them.
 
+## Unreleased
+
+### Features
+
+This minor adds vocabulary and annotation features, and removes nothing: a contract
+that generated before generates the same schemas now (`just compat` reports no
+breaking change against v0.3.1).
+
+- **Exclusive bounds: `@Range { exclusiveMin; exclusiveMax }`.** "Greater than zero"
+  is `exclusiveMin = 0`; either end may be exclusive and combined with the other
+  side's `min` or `max`, and a range that leaves no value (`exclusiveMin = 1; max = 1`)
+  is refused when the contract is reflected. Pkl enforces it through `Check`, JSON
+  Schema says `exclusiveMinimum` and `exclusiveMaximum`, zod `.gt()` and `.lt()`, pydantic
+  `gt` and `lt`; the probes try the bound itself and one step either side.
+- **A rule across fields through blocks: `@RequiredWhen` and the new
+  `@RequiredUnless`.** On a class, a module (a document, or a chart's values) or an
+  alias of a class; the condition and the required paths are dotted names through
+  blocks (`alerts.remote.enabled` decides, `database.owner.passwordSecret` is
+  required), a boolean or an enum condition, `in` holding booleans or strings. Every
+  path is resolved against the contract when it is generated, and an unknown one, a
+  path through a list or a scalar, a condition that is not a boolean or an enum, or one
+  whose default would make Pkl and a schema validator disagree is a generation
+  error. JSON Schema is `if`/`then` (when) or `if`/`else` (unless) over nested
+  `properties` and `required`; zod a `superRefine`; pydantic a `model_validator`
+  per class; Pkl enforces it in `Check`, from the annotations of the value's class
+  and its bases. A chart's values schema carries the module's rules too (it
+  carried none before). A flat `@RequiredWhen` on an alias is unchanged in the
+  schema, and zod and pydantic say it through the same code as the new ones.
+- **`@DenyKeys { keys }` on a map or an open object.** The keys a `Mapping` or a
+  `V.OpenObject` property must not carry: `propertyNames: { not: { enum: [...] } }`,
+  a zod `refine`, a pydantic `AfterValidator`, `Check` for Pkl. The compatibility
+  diff now reports `propertyNames` added as breaking.
+- **New vocabulary types.** `PromDuration` (`^[0-9]+(s|m|h)$`, Prometheus durations;
+  no empty form, a field that may be left out is `PromDuration?`), `DnsLabel` (an
+  RFC 1123 label of at most 63 characters; an optional one is `DnsLabel?`),
+  `StatusCodeList` (`^[A-Z_]+(\|[A-Z_]+)*$`, status code names joined by a bar) and
+  `GatewayTlsMode` (`"off" | "permissive"`, distinct from `TlsMode`).
+  `OtelProtocol` is unchanged.
+- **The reference lists a class's rules.** A class or alias with rules across fields
+  has a "Rules across fields" list in the generated reference.
+
 ## v0.3.1 — 2026-10-03
 
 ### Fixes

@@ -29,6 +29,25 @@ def _integral(value: Any) -> Any:
     return value
 
 
+def _at(value: Any, path: list[str]) -> Any:
+    # The value at a path through blocks; absent on the way is absent.
+    for key in path:
+        if value is None:
+            return None
+        value = getattr(value, key, None)
+    return value
+
+
+def _deny_keys(keys: list[str]):
+    def check(value: dict[str, Any]) -> dict[str, Any]:
+        found = [k for k in keys if k in value]
+        if found:
+            raise ValueError(f"must not have the key {found}")
+        return value
+
+    return check
+
+
 def _has_keys(keys: list[str]):
     def check(value: dict[str, Any]) -> dict[str, Any]:
         missing = [k for k in keys if k not in value]
@@ -56,6 +75,10 @@ PostgresUrl = Annotated[str, StringConstraints(pattern=r"^postgres(ql)?://"), Af
 NonEmptyString = Annotated[str, StringConstraints(min_length=1)]
 PositiveInt = Annotated[int, BeforeValidator(_integral), Field(ge=1)]
 OpenObject = dict[str, Any]
+PromDuration = Annotated[str, StringConstraints(pattern=r"^[0-9]+(s|m|h)$"), AfterValidator(_no_line_break)]
+StatusCodeList = Annotated[str, StringConstraints(pattern=r"^[A-Z_]+(\|[A-Z_]+)*$"), AfterValidator(_no_line_break)]
+DnsLabel = Annotated[str, StringConstraints(max_length=63, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"), AfterValidator(_no_line_break)]
+GatewayTlsMode = Literal["off", "permissive"]
 LogLevel = Literal["debug", "info", "warn", "error"]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^(sha256:[0-9a-f]{64})?$"), AfterValidator(_no_line_break)]
 PullPolicy = Literal["Always", "IfNotPresent", "Never"]
@@ -106,6 +129,8 @@ drain) and what it needs of its own."""
     labels: OpenObject = Field(default={"team": "platform"})
     #: Where the service archives what it served. Absent means it does not.
     archive: ConfigArchive | None = None
+    #: Alerting on the service's own error budget. Absent means no rules.
+    alerts: ConfigAlerts | None = None
     #: How the service calls out. Every field of it has a default, and so has the
     #: `retry` block inside it, so the whole block may be left out of a document.
     client: ConfigClient = Field(default_factory=lambda: ConfigClient.model_validate({"timeoutSeconds": 5, "retry": {"attempts": 3, "idempotentOnly": True}}))
@@ -144,6 +169,51 @@ class ConfigArchive(_Closed):
     prefix: NonEmptyString = Field(default="echo/requests")
     #: How often a batch is written, in seconds: not more often than every ten.
     batchSeconds: Annotated[int, BeforeValidator(_integral), Field(ge=10)] = Field(default=60)
+
+
+class ConfigAlerts(_Closed):
+    """Alerting rules for the service. Every threshold is a number or a duration with
+a rule of its own, and the receiver is needed unless the install only renders
+the rules for another cluster to evaluate."""
+    #: Where the rules are evaluated. Absent means in this cluster.
+    remote: ConfigAlertsRemote | None = None
+    #: How long a condition holds before it fires.
+    holdFor: PromDuration = Field(default="10m")
+    #: The share of requests that may fail before it fires: more than none, at most
+    #: all of them.
+    errorRatio: Annotated[float, Field(le=1, gt=0)] = Field(default=0.05)
+    #: The slowest a request may be, in seconds: more than zero.
+    latencySeconds: Annotated[float, Field(gt=0)] = Field(default=0.5)
+    #: The status codes that count as failures, joined by a bar.
+    codes: StatusCodeList = Field(default="INTERNAL|UNAVAILABLE")
+    #: The namespace the rules are evaluated in. Absent means the install's own.
+    namespace: DnsLabel | None = None
+    #: How the rules' gateway treats mutual TLS.
+    tls: GatewayTlsMode = Field(default="off")
+    #: Labels put on every alert. `severity` is the rules' own and may not be set here.
+    alertLabels: Annotated[dict[str, NonEmptyString], AfterValidator(_deny_keys(["severity"]))] = Field(default={})
+    #: Who is told. Needed unless the rules are only rendered.
+    receiver: ConfigAlertsReceiver | None = None
+
+    @model_validator(mode="after")
+    def _conditional_ConfigAlerts(self) -> "ConfigAlerts":
+        if _at(self, ["remote", "enabled"]) not in [True]:
+            missing = [".".join(p) for p in [["receiver", "url"]] if _at(self, p) is None]
+            if missing:
+                raise ValueError("unless `remote.enabled` is `true`, `receiver.url` are required: missing " + ", ".join(missing))
+        return self
+
+
+class ConfigAlertsRemote(_Closed):
+    """Where the rules are evaluated."""
+    #: Whether the install only renders the rules, for another cluster to evaluate.
+    enabled: bool = Field(default=False)
+
+
+class ConfigAlertsReceiver(_Closed):
+    """Who is told."""
+    #: The receiver's URL.
+    url: NonEmptyString | None = None
 
 
 class ConfigClient(_Closed):

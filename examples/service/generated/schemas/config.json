@@ -80,6 +80,136 @@
       },
       "description": "Where the service archives what it served. Absent means it does not."
     },
+    "alerts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remote": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether the install only renders the rules, for another cluster to evaluate.",
+              "default": false
+            }
+          },
+          "description": "Where the rules are evaluated. Absent means in this cluster."
+        },
+        "holdFor": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m|h)$",
+          "not": {
+            "pattern": "[\\n\\r\\f\\x0B\\x85\u2028\u2029]"
+          },
+          "description": "How long a condition holds before it fires.",
+          "default": "10m"
+        },
+        "errorRatio": {
+          "type": "number",
+          "maximum": 1,
+          "exclusiveMinimum": 0,
+          "description": "The share of requests that may fail before it fires: more than none, at most\nall of them.",
+          "default": 0.05
+        },
+        "latencySeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "The slowest a request may be, in seconds: more than zero.",
+          "default": 0.5
+        },
+        "codes": {
+          "type": "string",
+          "pattern": "^[A-Z_]+(\\|[A-Z_]+)*$",
+          "not": {
+            "pattern": "[\\n\\r\\f\\x0B\\x85\u2028\u2029]"
+          },
+          "description": "The status codes that count as failures, joined by a bar.",
+          "default": "INTERNAL|UNAVAILABLE"
+        },
+        "namespace": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "not": {
+            "pattern": "[\\n\\r\\f\\x0B\\x85\u2028\u2029]"
+          },
+          "description": "The namespace the rules are evaluated in. Absent means the install's own."
+        },
+        "tls": {
+          "enum": [
+            "off",
+            "permissive"
+          ],
+          "description": "How the rules' gateway treats mutual TLS.",
+          "default": "off"
+        },
+        "alertLabels": {
+          "type": "object",
+          "propertyNames": {
+            "not": {
+              "enum": [
+                "severity"
+              ]
+            }
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Labels put on every alert. `severity` is the rules' own and may not be set here.",
+          "default": {}
+        },
+        "receiver": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The receiver's URL."
+            }
+          },
+          "description": "Who is told. Needed unless the rules are only rendered."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "remote": {
+                "properties": {
+                  "enabled": {
+                    "enum": [
+                      true
+                    ]
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            },
+            "required": [
+              "remote"
+            ]
+          },
+          "else": {
+            "properties": {
+              "receiver": {
+                "required": [
+                  "url"
+                ]
+              }
+            },
+            "required": [
+              "receiver"
+            ]
+          }
+        }
+      ],
+      "description": "Alerting on the service's own error budget. Absent means no rules."
+    },
     "client": {
       "type": "object",
       "additionalProperties": false,

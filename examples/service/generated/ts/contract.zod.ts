@@ -3,6 +3,16 @@ import { z } from "zod";
 
 const noLineBreak = (s: string): boolean => !/[\n\r\f\v\u0085\u2028\u2029]/.test(s);
 
+// The value at a path through blocks; absent on the way is absent.
+const at = (o: unknown, path: string[]): unknown => {
+  let v: unknown = o;
+  for (const k of path) {
+    if (v === null || v === undefined) return undefined;
+    v = (v as Record<string, unknown>)[k];
+  }
+  return v;
+};
+
 /** host:port as the configuration contract spells it today. It does NOT bound the port at 65535, because the hand-written pattern does not; `Port` is the stricter vocabulary a contract may move to. */
 export const HostPort = z.string().regex(/^[^\t \xA0  -   　]*:[0-9]{1,5}$/).refine(noLineBreak);
 export type HostPort = z.infer<typeof HostPort>;
@@ -18,6 +28,18 @@ export type PositiveInt = z.infer<typeof PositiveInt>;
 /** Kubernetes' own object shape, passed through unchanged. */
 export const OpenObject = z.looseObject({});
 export type OpenObject = z.infer<typeof OpenObject>;
+/** A duration in Prometheus' spelling: whole seconds, minutes or hours, `90s`, `15m`, `2h`. Narrower than `GoDuration`, which also admits `ns`, `us` and `ms`, units Prometheus' `for`, `interval` and range selectors do not read. Never empty: a duration that may be left out is `PromDuration?`, absent, and not a `""` that means "none" (the rule of every vocabulary type: an optional field is absent or has a value). */
+export const PromDuration = z.string().regex(/^[0-9]+(s|m|h)$/).refine(noLineBreak);
+export type PromDuration = z.infer<typeof PromDuration>;
+/** A list of status code names joined by a bar, `INTERNAL|UNAVAILABLE`: upper-case letters and underscores (a gRPC code's spelling), the shape a regular expression alternation of them takes in a query. At least one code, and no empty member. */
+export const StatusCodeList = z.string().regex(/^[A-Z_]+(\|[A-Z_]+)*$/).refine(noLineBreak);
+export type StatusCodeList = z.infer<typeof StatusCodeList>;
+/** An RFC 1123 DNS label, as Kubernetes spells a namespace: lower-case letters, digits and hyphens, starting and ending with a letter or a digit, at most 63 characters. Never empty, and never dotted (`DnsName` is the dotted one). A field that may be left out (a namespace, a cluster name) is `DnsLabel?`, absent, and not a `""`. */
+export const DnsLabel = z.string().max(63).regex(/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/).refine(noLineBreak);
+export type DnsLabel = z.infer<typeof DnsLabel>;
+/** How a gateway's listener treats mutual TLS: `off` serves cleartext only, `permissive` serves both. Not `TlsMode`: a gateway has no `strict` (a listener that refuses every cleartext client is a different decision, taken by its own setting), so the value must not be spellable. */
+export const GatewayTlsMode = z.enum(["off", "permissive"]);
+export type GatewayTlsMode = z.infer<typeof GatewayTlsMode>;
 /** The lowest level a service writes. */
 export const LogLevel = z.enum(["debug", "info", "warn", "error"]);
 export type LogLevel = z.infer<typeof LogLevel>;
@@ -74,6 +96,8 @@ export const Config_shape = {
   labels: OpenObject.default({"team": "platform"}),
   /** Where the service archives what it served. Absent means it does not. */
   archive: z.lazy(() => ConfigArchive).optional(),
+  /** Alerting on the service's own error budget. Absent means no rules. */
+  alerts: z.lazy(() => ConfigAlerts).optional(),
   /** How the service calls out. Every field of it has a default, and so has the `retry` block inside it, so the whole block may be left out of a document. */
   client: z.lazy(() => ConfigClient).default({"timeoutSeconds": 5, "retry": {"attempts": 3, "idempotentOnly": true}}),
 };
@@ -121,6 +145,52 @@ export const ConfigArchive_shape = {
 };
 export const ConfigArchive = z.strictObject(ConfigArchive_shape);
 export type ConfigArchive = z.infer<typeof ConfigArchive>;
+
+/** Alerting rules for the service. Every threshold is a number or a duration with a rule of its own, and the receiver is needed unless the install only renders the rules for another cluster to evaluate. */
+export const ConfigAlerts_shape = {
+  /** Where the rules are evaluated. Absent means in this cluster. */
+  remote: z.lazy(() => ConfigAlertsRemote).optional(),
+  /** How long a condition holds before it fires. */
+  holdFor: PromDuration.default("10m"),
+  /** The share of requests that may fail before it fires: more than none, at most all of them. */
+  errorRatio: z.number().max(1).gt(0).default(0.05),
+  /** The slowest a request may be, in seconds: more than zero. */
+  latencySeconds: z.number().gt(0).default(0.5),
+  /** The status codes that count as failures, joined by a bar. */
+  codes: StatusCodeList.default("INTERNAL|UNAVAILABLE"),
+  /** The namespace the rules are evaluated in. Absent means the install's own. */
+  namespace: DnsLabel.optional(),
+  /** How the rules' gateway treats mutual TLS. */
+  tls: GatewayTlsMode.default("off"),
+  /** Labels put on every alert. `severity` is the rules' own and may not be set here. */
+  alertLabels: z.record(z.string(), NonEmptyString).refine((o) => !["severity"].some((k) => Object.prototype.hasOwnProperty.call(o, k)), { message: "must not have the key `severity`" }).default({}),
+  /** Who is told. Needed unless the rules are only rendered. */
+  receiver: z.lazy(() => ConfigAlertsReceiver).optional(),
+};
+export const ConfigAlerts = z.strictObject(ConfigAlerts_shape).superRefine((o, ctx) => {
+    if (!([true] as unknown[]).includes(at(o, ["remote", "enabled"]))) {
+      for (const p of [["receiver", "url"]]) {
+        if (at(o, p) === undefined) ctx.addIssue({ code: "custom", path: p, message: "unless `remote.enabled` is `true`, `receiver.url` are required" });
+      }
+    }
+  });
+export type ConfigAlerts = z.infer<typeof ConfigAlerts>;
+
+/** Where the rules are evaluated. */
+export const ConfigAlertsRemote_shape = {
+  /** Whether the install only renders the rules, for another cluster to evaluate. */
+  enabled: z.boolean().default(false),
+};
+export const ConfigAlertsRemote = z.strictObject(ConfigAlertsRemote_shape);
+export type ConfigAlertsRemote = z.infer<typeof ConfigAlertsRemote>;
+
+/** Who is told. */
+export const ConfigAlertsReceiver_shape = {
+  /** The receiver's URL. */
+  url: NonEmptyString.optional(),
+};
+export const ConfigAlertsReceiver = z.strictObject(ConfigAlertsReceiver_shape);
+export type ConfigAlertsReceiver = z.infer<typeof ConfigAlertsReceiver>;
 
 /** How the service calls out. */
 export const ConfigClient_shape = {

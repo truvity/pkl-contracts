@@ -26,6 +26,10 @@ The constrained types the fields use. A pattern is a search, and never matches a
 | `NonEmptyString` | string | at least 1 character | A string of at least one character. |
 | `PositiveInt` | integer | at least 1 | A whole number of at least one. |
 | `OpenObject` | open |  | Kubernetes' own object shape, passed through unchanged. |
+| `PromDuration` | string | matches `^[0-9]+(s\|m\|h)$`, never a line break | A duration in Prometheus' spelling: whole seconds, minutes or hours, `90s`, `15m`, `2h`. Narrower than `GoDuration`, which also admits `ns`, `us` and `ms`, units Prometheus' `for`, `interval` and range selectors do not read. Never empty: a duration that may be left out is `PromDuration?`, absent, and not a `""` that means "none" (the rule of every vocabulary type: an optional field is absent or has a value). |
+| `StatusCodeList` | string | matches `^[A-Z_]+(\\|[A-Z_]+)*$`, never a line break | A list of status code names joined by a bar, `INTERNAL\|UNAVAILABLE`: upper-case letters and underscores (a gRPC code's spelling), the shape a regular expression alternation of them takes in a query. At least one code, and no empty member. |
+| `DnsLabel` | string | at most 63 characters; matches `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, never a line break | An RFC 1123 DNS label, as Kubernetes spells a namespace: lower-case letters, digits and hyphens, starting and ending with a letter or a digit, at most 63 characters. Never empty, and never dotted (`DnsName` is the dotted one). A field that may be left out (a namespace, a cluster name) is `DnsLabel?`, absent, and not a `""`. |
+| `GatewayTlsMode` | one of `off`, `permissive` |  | How a gateway's listener treats mutual TLS: `off` serves cleartext only, `permissive` serves both. Not `TlsMode`: a gateway has no `strict` (a listener that refuses every cleartext client is a different decision, taken by its own setting), so the value must not be spellable. |
 | `LogLevel` | one of `debug`, `info`, `warn`, `error` |  | The lowest level a service writes. |
 | `ImageDigest` | string | matches `^(sha256:[0-9a-f]{64})?$`, never a line break | An image digest, or empty when there is none. |
 | `PullPolicy` | one of `Always`, `IfNotPresent`, `Never` |  | When a container image is pulled. |
@@ -78,6 +82,7 @@ Document `https://example.com/echo/schemas/config.json`.
 | `retention` | ConfigRetention | no | `{"days": 30, "keepForever": false}` |  | How long what the service keeps is kept. A default that is a class, which differs from the class's own in `days`. |  |
 | `labels` | OpenObject | no | `{"team": "platform"}` |  | Labels put on what the service writes. A default that is an open object. |  |
 | `archive` | ConfigArchive | no |  |  | Where the service archives what it served. Absent means it does not. |  |
+| `alerts` | ConfigAlerts | no |  |  | Alerting on the service's own error budget. Absent means no rules. |  |
 | `client` | ConfigClient | no | `{"timeoutSeconds": 5, "retry": {"attempts": 3, "idempotentOnly": true}}` |  | How the service calls out. Every field of it has a default, and so has the `retry` block inside it, so the whole block may be left out of a document. |  |
 
 ### `Listen`
@@ -120,6 +125,44 @@ Where the service archives what it served.
 | `bucket` | NonEmptyString | yes |  | at least 1 character | **Set at install.** The bucket. Every install names its own, so the defaults leave it out and the schema requires it. | yes |
 | `prefix` | NonEmptyString | no | `"echo/requests"` | at least 1 character | What every object's key begins with. |  |
 | `batchSeconds` | PositiveInt | no | `60` | at least 10 | How often a batch is written, in seconds: not more often than every ten. |  |
+
+### `ConfigAlerts`
+
+Alerting rules for the service. Every threshold is a number or a duration with
+a rule of its own, and the receiver is needed unless the install only renders
+the rules for another cluster to evaluate.
+
+Rules across fields:
+
+- Unless `remote.enabled` is `true`, `receiver.url` are required.
+
+| Field | Type | Required | Default | Constraints | Description | Set at install |
+|---|---|---|---|---|---|---|
+| `remote` | ConfigAlertsRemote | no |  |  | Where the rules are evaluated. Absent means in this cluster. |  |
+| `holdFor` | PromDuration | no | `"10m"` | matches `^[0-9]+(s\|m\|h)$`, never a line break | How long a condition holds before it fires. |  |
+| `errorRatio` | Ratio | no | `0.05` | greater than 0 and at most 1 | The share of requests that may fail before it fires: more than none, at most all of them. |  |
+| `latencySeconds` | number | no | `0.5` | greater than 0 | The slowest a request may be, in seconds: more than zero. |  |
+| `codes` | StatusCodeList | no | `"INTERNAL\|UNAVAILABLE"` | matches `^[A-Z_]+(\\|[A-Z_]+)*$`, never a line break | The status codes that count as failures, joined by a bar. |  |
+| `namespace` | DnsLabel | no |  | at most 63 characters; matches `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, never a line break | The namespace the rules are evaluated in. Absent means the install's own. |  |
+| `tls` | GatewayTlsMode | no | `"off"` |  | How the rules' gateway treats mutual TLS. |  |
+| `alertLabels` | map of NonEmptyString | no | `{}` | never has the keys `severity` | Labels put on every alert. `severity` is the rules' own and may not be set here. |  |
+| `receiver` | ConfigAlertsReceiver | no |  |  | Who is told. Needed unless the rules are only rendered. |  |
+
+### `ConfigAlertsRemote`
+
+Where the rules are evaluated.
+
+| Field | Type | Required | Default | Constraints | Description | Set at install |
+|---|---|---|---|---|---|---|
+| `enabled` | boolean | no | `false` |  | Whether the install only renders the rules, for another cluster to evaluate. |  |
+
+### `ConfigAlertsReceiver`
+
+Who is told.
+
+| Field | Type | Required | Default | Constraints | Description | Set at install |
+|---|---|---|---|---|---|---|
+| `url` | NonEmptyString | no |  | at least 1 character | The receiver's URL. |  |
 
 ### `ConfigClient`
 

@@ -35,15 +35,19 @@ local function classSection(c: Model.Cls, n: Model.Node): String =
     + (if (c.doc != null) "\(c.doc)\n\n" else "")
     + (if (c.base != null) "Extends `\(c.base.cls.qname)`.\n\n" else "")
     + (
-      if (n.schema != null || n.requiredWhen != null)
-        List(
-          if (n.schema != null) "Document `\(n.schema.id)`." else null,
-          if (n.requiredWhen != null) "\(Model.constraintsOf(n).first.capitalize())." else null,
-        )
-          .filterNonNull()
-          .join(" ") + "\n\n"
+      if (n.schema != null)
+        "Document `\(n.schema.id)`.\n\n"
       else
         ""
+    )
+    + (
+      let (rules = n.conditions + c.conditions)
+        if (rules.isEmpty)
+          ""
+        else
+          "Rules across fields:\n\n"
+            + rules.map((r) -> "- \(Model.conditionPhrase(r).capitalize()).\n").join("")
+            + "\n"
     )
     + (
       if (c.props.isEmpty)

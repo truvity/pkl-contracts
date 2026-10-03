@@ -26,6 +26,9 @@ labels: V.OpenObject = new Dynamic { team = "platform" }
 /// Where the service archives what it served. Absent means it does not.
 archive: Archive?
 
+/// Alerting on the service's own error budget. Absent means no rules.
+alerts: Alerts?
+
 /// How the service calls out. Every field of it has a default, and so has the
 /// `retry` block inside it, so the whole block may be left out of a document.
 client: Client
@@ -67,4 +70,49 @@ class Archive {
   /// How often a batch is written, in seconds: not more often than every ten.
   @A.Range { min = 10 }
   batchSeconds: V.PositiveInt = 60
+}
+
+/// Alerting rules for the service. Every threshold is a number or a duration with
+/// a rule of its own, and the receiver is needed unless the install only renders
+/// the rules for another cluster to evaluate.
+@A.RequiredUnless {
+  property = "remote.enabled"
+  `in` { true }
+  require { "receiver.url" }
+}
+class Alerts {
+  /// Where the rules are evaluated. Absent means in this cluster.
+  remote: AlertsRemote?
+  /// How long a condition holds before it fires.
+  holdFor: V.PromDuration = "10m"
+  /// The share of requests that may fail before it fires: more than none, at most
+  /// all of them.
+  @A.Range { exclusiveMin = 0 }
+  errorRatio: V.Ratio = 0.05
+  /// The slowest a request may be, in seconds: more than zero.
+  @A.Range { exclusiveMin = 0 }
+  latencySeconds: Number = 0.5
+  /// The status codes that count as failures, joined by a bar.
+  codes: V.StatusCodeList = "INTERNAL|UNAVAILABLE"
+  /// The namespace the rules are evaluated in. Absent means the install's own.
+  namespace: V.DnsLabel?
+  /// How the rules' gateway treats mutual TLS.
+  tls: V.GatewayTlsMode = "off"
+  /// Labels put on every alert. `severity` is the rules' own and may not be set here.
+  @A.DenyKeys { keys { "severity" } }
+  alertLabels: Mapping<String, V.NonEmptyString> = new Mapping {}
+  /// Who is told. Needed unless the rules are only rendered.
+  receiver: AlertsReceiver?
+}
+
+/// Where the rules are evaluated.
+class AlertsRemote {
+  /// Whether the install only renders the rules, for another cluster to evaluate.
+  enabled: Boolean = false
+}
+
+/// Who is told.
+class AlertsReceiver {
+  /// The receiver's URL.
+  url: V.NonEmptyString?
 }
