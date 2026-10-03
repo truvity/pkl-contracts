@@ -7,4 +7,10 @@ dependencies {
   ["vocab"] = import("../../packages/vocab/PklProject")
   ["fragments"] = import("../../packages/fragments/PklProject")
   ["templates"] = import("../../packages/templates/PklProject")
+  ["model"] = import("../../packages/model/PklProject")
+  ["jsonschema"] = import("../../packages/jsonschema/PklProject")
+  ["helm"] = import("../../packages/helm/PklProject")
+  ["typescript"] = import("../../packages/typescript/PklProject")
+  ["python"] = import("../../packages/python/PklProject")
+  ["docs"] = import("../../packages/docs/PklProject")
 }

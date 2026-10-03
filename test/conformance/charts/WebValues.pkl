@@ -1,0 +1,21 @@
+/// The `web` chart's default values, checked against its contract when the
+/// module is evaluated.
+amends "WebChart.pkl"
+
+config {
+  listen { address = ":8080" }
+  probes { address = ":7070" }
+  log { level = "info" }
+  drain { seconds = 20 }
+  urls { address = "http://shortener-urls:8080" }
+  assets { directory = "/srv/web" }
+}
+
+images {
+  web {
+    registry = "registry.example.com"
+    repository = "example/shortener/web"
+    tag = ""
+    digest = ""
+  }
+}

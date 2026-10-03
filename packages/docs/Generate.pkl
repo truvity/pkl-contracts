@@ -1,0 +1,32 @@
+/// Generates a Markdown reference from the modules of a contract, into one
+/// file, `reference.md`: the documents, the constrained types with their
+/// constraints, every class's fields (type, required, default, constraints,
+/// description) and the fields that name a secret.
+///
+///     pkl run --project-dir . package://.../contracts.docs@<version>#/Generate.pkl \
+///       -- --dir docs Config.pkl
+extends "pkl:Command"
+
+import "@model/Model.pkl"
+
+import "Docs.pkl"
+
+options: Options
+
+class Options {
+  /// The directory to write into, relative to the working directory.
+  @Flag { shortName = "d" }
+  dir: String = "docs"
+
+  /// The modules of the contract.
+  @Argument { convert = (path) -> new Import { uri = path } }
+  modules: Listing<Module>
+}
+
+output {
+  files {
+    ["\(options.dir)/reference.md"] {
+      text = Docs.render(Model.documents(options.modules.toList()))
+    }
+  }
+}

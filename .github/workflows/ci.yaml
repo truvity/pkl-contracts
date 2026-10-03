@@ -34,7 +34,11 @@ jobs:
       # `vuln` is not here: it runs in security.yaml, on a schedule, where a
       # change upstream is reported without turning every pull request red
       # (the component contract's C10).
-      recipes: '["test", "lint", "example", "package", "leak-canary"]'
+      #
+      # `conformance` and `conformance-kotlin` are two jobs because Gradle makes
+      # Kotlin the slow part of the cross-language suite: the first reports the
+      # other engines without waiting for it.
+      recipes: '["test", "lint", "example", "package", "leak-canary", "generated", "compat", "conformance", "conformance-kotlin"]'
 
   # Stable name for branch protection: the matrix reports as "recipes / test"
   # and so on, so a required context called "check" would never arrive and

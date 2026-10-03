@@ -1,0 +1,13 @@
+amends "pkl:Project"
+
+import "../Release.pkl"
+
+package =
+  Release.metadata(
+    "contracts.python",
+    "Generates pydantic v2 models from a contract: the vocabulary's constraints as Field constraints and validators, closed models, and the semantic rules of decision 0010.",
+  )
+
+dependencies {
+  ["model"] = import("../model/PklProject")
+}

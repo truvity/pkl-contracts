@@ -1,0 +1,14 @@
+amends "pkl:Project"
+
+import "../Release.pkl"
+
+package =
+  Release.metadata(
+    "contracts.helm",
+    "Generates a chart's values.schema.json (the platform and config schemas composed), its values.yaml defaults and a README values table from a chart's values contract.",
+  )
+
+dependencies {
+  ["model"] = import("../model/PklProject")
+  ["jsonschema"] = import("../jsonschema/PklProject")
+}

@@ -9,10 +9,10 @@ amends "pkl:test"
 
 import "pkl:reflect"
 
+import "@model/Model.pkl"
 import "@vocab/Vocab.pkl"
 
 import "Load.pkl"
-import "Model.pkl"
 import "Probes.pkl"
 import "Showcase.pkl"
 

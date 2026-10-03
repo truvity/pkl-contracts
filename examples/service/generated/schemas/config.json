@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/echo/schemas/config.json",
+  "title": "echo",
+  "description": "An example service that serves one listener and keeps a record in a\nPostgreSQL database. Its configuration is the service envelope (probes, log,\ndrain) and what it needs of its own.",
+  "allOf": [
+    {
+      "$ref": "https://github.com/truvity/policy/schemas/service.json"
+    }
+  ],
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": [
+    "listen",
+    "postgres"
+  ],
+  "properties": {
+    "listen": {
+      "$ref": "https://github.com/truvity/policy/schemas/fragments/listen.json",
+      "description": "The listener the service's own traffic is served on."
+    },
+    "postgres": {
+      "$ref": "https://github.com/truvity/policy/schemas/fragments/postgres.json",
+      "description": "The database the service keeps its records in."
+    }
+  }
+}

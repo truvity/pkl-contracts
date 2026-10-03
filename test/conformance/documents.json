@@ -1,0 +1,12 @@
+{
+  "web": {"schema": "web.json", "module": "conformance/contract/Web.pkl"},
+  "urls": {"schema": "urls.json", "module": "conformance/contract/Urls.pkl"},
+  "redirect": {"schema": "redirect.json", "module": "conformance/contract/Redirect.pkl"},
+  "stat": {"schema": "stat.json", "module": "conformance/contract/Stat.pkl"},
+  "prober": {"schema": "prober.json", "module": "conformance/contract/Prober.pkl"},
+  "migrate": {"schema": "migrate.json", "module": "conformance/contract/Migrate.pkl"},
+  "log": {"schema": "log.json", "module": "conformance/contract/LogArchiver.pkl"},
+  "shortener": {"schema": "shortener.json", "module": "conformance/contract/Shortener.pkl"},
+  "platform": {"schema": "fragments/platform.json", "module": "conformance/PlatformRef.pkl"},
+  "showcase": {"schema": "showcase.json", "module": "Showcase.pkl"}
+}

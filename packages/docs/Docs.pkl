@@ -1,0 +1,97 @@
+/// A Markdown reference of a contract, from the intermediate form: the
+/// documents, the vocabulary types they use with their constraints, every class
+/// with its fields (type, whether required, default, constraints) and the
+/// fields that name a secret. The text of each description is the field's own
+/// doc comment, so documenting the contract documents the reference.
+module contracts.docs.Docs
+
+import "@model/Model.pkl"
+
+local function cell(s: String?): String = (s ?? "").replaceAll("\n", " ").replaceAll("|", "\\|")
+
+local function code(s: String): String = if (s == "") "" else "`\(s.replaceAll("|", "\\|"))`"
+
+local function table(headers: List<String>, rows: List<List<String>>): String =
+  "| \(headers.join(" | ")) |\n|\(headers.map((_) -> "---").join("|"))|\n"
+    + rows.map((r) -> "| \(r.join(" | ")) |\n").join("")
+
+local function propRow(p: Model.Prop): List<String> =
+  List(
+    "`\(p.name)`",
+    cell(Model.typeLabel(p.type)),
+    if (p.required) "yes" else "no",
+    if (p.hasDefault) code(Model.literal(p.default)) else "",
+    cell(Model.constraintsOf(p.type).join("; ")),
+    cell((if (p.secret) "**Names a secret.** " else "") + (p.doc ?? "")),
+  )
+
+local function classSection(c: Model.Cls, n: Model.Node): String =
+  "### `\(c.qname)`\n\n"
+    + (if (c.doc != null) "\(c.doc)\n\n" else "")
+    + (if (c.base != null) "Extends `\(c.base.cls.qname)`.\n\n" else "")
+    + (
+      if (n.schema != null || n.requiredWhen != null)
+        List(
+          if (n.schema != null) "Document `\(n.schema.id)`." else null,
+          if (n.requiredWhen != null) "\(Model.constraintsOf(n).first.capitalize())." else null,
+        )
+          .filterNonNull()
+          .join(" ") + "\n\n"
+      else
+        ""
+    )
+    + (
+      if (c.props.isEmpty)
+        "No fields of its own.\n\n"
+      else
+        table(
+          List("Field", "Type", "Required", "Default", "Constraints", "Description"),
+          c.props.map((p) -> propRow(p)),
+        ) + "\n"
+    )
+
+local function aliasRow(n: Model.Node): List<String> =
+  List(
+    "`\(n.alias)`",
+    cell(if (n.kind == "enum") "one of \(n.values.map((v) -> "`\(v)`").join(", "))" else n.kind),
+    cell(Model.constraintsOf(n).join("; ")),
+    cell(n.doc),
+  )
+
+local function secretRows(cs: List<Model.Node>): List<List<String>> =
+  cs.flatMap((n) ->
+    n.cls.props
+      .filter((p) -> p.secret)
+      .map((p) -> List("`\(n.cls.qname).\(p.name)`", cell(p.doc)))
+  )
+
+/// The reference for the documents in `roots`.
+function render(roots: Mapping<String, Model.Node>): String =
+  let (ns = roots.toMap().values.toList())
+  let (cs = Model.classes(ns))
+  let (secrets = secretRows(cs))
+    "<!-- Generated from a contract by contracts.docs. Do not edit. -->\n\n"
+      + "# Contract reference\n\n"
+      + "## Documents\n\n"
+      + table(
+        List("Document", "Title", "`$id`"),
+        roots
+          .toMap()
+          .entries
+          .map((e) -> List("`\(e.first)`", cell(e.second.schema.title), "`\(e.second.schema.id)`")),
+      )
+      + "\n## Types\n\nThe constrained types the fields use. A pattern is a search, and never matches a string with a newline in it.\n\n"
+      + table(
+        List("Type", "Kind", "Constraints", "Description"),
+        Model.aliases(ns).map((a) -> aliasRow(a)),
+      )
+      + "\n## Classes\n\n"
+      + cs.map((n) -> classSection(n.cls, n)).join("")
+      + "## Secrets\n\n"
+      + (
+        if (secrets.isEmpty)
+          "No field names a secret.\n"
+        else
+          "These fields hold the NAME of a secret, never its value: the environment variable that holds it, or the Secret and key it comes from.\n\n"
+            + table(List("Field", "Description"), secrets)
+      )

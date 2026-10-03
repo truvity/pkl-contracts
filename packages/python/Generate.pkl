@@ -1,0 +1,33 @@
+/// Generates pydantic v2 models from the modules of a contract, into one file,
+/// `contract_pydantic.py`: every shape as a model or an annotated type, and
+/// `SCHEMAS`, the documents by key (the tail of their `$id` after `/schemas/`).
+///
+///     pkl run --project-dir . package://.../contracts.python@<version>#/Generate.pkl \
+///       -- --dir py Config.pkl
+///
+/// Needs `pydantic` 2 where the file is used.
+extends "pkl:Command"
+
+import "@model/Model.pkl"
+
+import "Pydantic.pkl"
+
+options: Options
+
+class Options {
+  /// The directory to write into, relative to the working directory.
+  @Flag { shortName = "d" }
+  dir: String = "py"
+
+  /// The modules of the contract.
+  @Argument { convert = (path) -> new Import { uri = path } }
+  modules: Listing<Module>
+}
+
+output {
+  files {
+    ["\(options.dir)/contract_pydantic.py"] {
+      text = Pydantic.render(Model.documents(options.modules.toList()))
+    }
+  }
+}

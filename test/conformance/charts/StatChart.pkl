@@ -1,0 +1,23 @@
+/// The values of the `stat` chart: the platform block, the service's own
+/// configuration (exactly `Stat`) and the one image it ships.
+@A.Chart { title = "stat chart values" }
+module conformance.charts.StatChart
+
+extends "@templates/ChartValues.pkl"
+
+import "@fragments/Platform.pkl"
+import "@vocab/Annotations.pkl" as A
+
+import "../contract/Stat.pkl"
+
+/// The service's own configuration.
+config: Stat
+
+/// The one image this chart ships.
+images: Images
+
+/// The images of this chart, by component.
+class Images {
+  /// The service's image.
+  stat: Platform.PlatformImage
+}

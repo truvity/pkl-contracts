@@ -1,0 +1,368 @@
+/// Whether a set of JSON Schemas, the `after`, still accepts everything the
+/// `before` set accepted, and demands nothing more. A change that does not is
+/// breaking for whoever writes a document against the `before` schemas.
+///
+/// What is breaking, by the keywords of the draft 2020-12 documents this
+/// repository generates:
+///
+///   - a property removed (a document that sets it is no longer one the
+///     contract describes), or a whole document removed;
+///   - a property newly required;
+///   - a narrowed type (`number` to `integer`, `string` to `integer`), enum (a
+///     member removed, or an enum added), or range or length (`minimum`,
+///     `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`,
+///     `maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`
+///     raised, lowered or added);
+///   - an object closed that was open (`additionalProperties` or
+///     `unevaluatedProperties` set to `false`);
+///   - a pattern tightened: added where there was none, or changed. Whether one
+///     regular expression is narrower than another is not decidable in general,
+///     so a changed pattern is reported as breaking and a reviewer overrules it;
+///   - an `anyOf` alternative that is no longer covered, an `allOf` that gained
+///     a member, and a changed `if`, `then`, `else`, `not`, `const` or
+///     `dependentRequired`, which are reported as breaking because they cannot
+///     be compared member by member.
+///
+/// Compatible, and reported only as such: a property added (optional), a type
+/// or enum widened, a range or length relaxed, a pattern removed, an object
+/// opened, a changed `default`, `description` or `title`, a document added.
+///
+/// A `$ref` is followed: to a definition in the same document (`#/$defs/x`), to
+/// a document embedded under `$defs` by its `$id` (a chart's values schema), or,
+/// when the two sides differ, to another document of the set by `$id`. Two sides
+/// that refer to the same other document are not compared here, because that
+/// document is compared on its own.
+module contracts.jsonschema.Compatibility
+
+import "pkl:json"
+
+/// One difference between two schemas.
+class Change {
+  /// The document, as the path of its file in the set.
+  document: String
+
+  /// Where in the document, as a dotted path of property names (`[]` for the
+  /// items of an array, `<name>` for the values of a map).
+  path: String
+
+  /// Whether a document valid before can now be invalid, or a new demand is made.
+  breaking: Boolean
+
+  /// What changed.
+  message: String
+}
+
+/// A JSON document read as data: objects are maps, arrays are lists.
+typealias Data = Any
+
+/// Reads `text` as JSON into maps and lists.
+function parse(text: String): Data = norm(new json.Parser {}.parse(text))
+
+local function norm(v: Any): Data =
+  if (v is Mapping)
+    v.toMap().mapValues((_, e) -> norm(e))
+  else if (v is Listing)
+    v.toList().map((e) -> norm(e))
+  else if (v is Dynamic)
+    v.toMap().mapValues((_, e) -> norm(e))
+  else
+    v
+
+/// The differences between the sets of schemas `before` and `after`, each a map
+/// from a file's path to its parsed content.
+function diff(before: Map<String, Data>, after: Map<String, Data>): List<Change> =
+  before.entries.flatMap((e) ->
+    if (!after.containsKey(e.first))
+      List(change(e.first, "", true, "the document is gone"))
+    else
+      compare(
+        context(e.first, e.second, after[e.first], before, after),
+        "",
+        e.second,
+        after[e.first],
+        List(),
+      )
+  )
+    + after.keys
+      .filter((k) -> !before.containsKey(k))
+      .toList()
+      .map((k) -> change(k, "", false, "a document was added"))
+
+local class Ctx {
+  document: String
+  rootBefore: Data
+  rootAfter: Data
+  setBefore: Map<String, Data>
+  setAfter: Map<String, Data>
+}
+
+local function context(
+  doc: String,
+  rb: Data,
+  ra: Data,
+  sb: Map<String, Data>,
+  sa: Map<String, Data>,
+): Ctx = new Ctx {
+  document = doc
+  rootBefore = rb
+  rootAfter = ra
+  setBefore = sb
+  setAfter = sa
+}
+
+local function change(doc: String, where: String, isBreaking: Boolean, what: String): Change = new Change {
+  document = doc
+  path = where
+  breaking = isBreaking
+  message = what
+}
+
+local function at(path: String, name: String): String = if (path == "") name else "\(path).\(name)"
+
+local function get(m: Data, key: String): Any = if (m is Map) m.getOrNull(key) else null
+
+local function asList(v: Any): List<Any> = if (v is List) v else List()
+
+/// The definition `ref` names inside `root`: a `#/$defs/x`, or a document
+/// embedded under `$defs` by its `$id`.
+local function embedded(ref: String, root: Data): Data =
+  let (defs = get(root, "$defs"))
+    if (ref.startsWith("#/$defs/")) get(defs, ref.replaceFirst("#/$defs/", "")) else get(defs, ref)
+
+local function refOf(node: Data): String? =
+  let (r = get(node, "$ref"))
+    if (r is String) r else null
+
+local function documentOf(ref: String, set: Map<String, Data>): Data =
+  set.values.toList().findOrNull((d) -> get(d, "$id") == ref)
+
+/// Whether `ref` names a document of `set` that is not embedded in `root`.
+local function otherDocument(ref: String, root: Data, set: Map<String, Data>): Boolean =
+  embedded(ref, root) == null && documentOf(ref, set) != null
+
+/// A node with its `$ref` replaced by what it names, the node's own keywords
+/// laid over it.
+local function resolve(node: Data, root: Data, set: Map<String, Data>): Data =
+  let (ref = refOf(node))
+    if (ref == null)
+      node
+    else
+      let (target = embedded(ref, root) ?? documentOf(ref, set))
+        if (target is Map)
+          resolve(target, root, set) + (node as Map).filter((k, _) -> k != "$ref")
+        else
+          node
+
+local function typesOf(node: Data): Set<String> =
+  let (t = get(node, "type"))
+    if (t is String) Set(t) else if (t is List) t.toSet() else Set()
+
+local function covered(t: String, after: Set<String>): Boolean =
+  after.contains(t) || (t == "integer" && after.contains("number"))
+
+local lowerBounds: List<String> =
+  List("minimum", "exclusiveMinimum", "minLength", "minItems", "minProperties")
+
+local upperBounds: List<String> =
+  List("maximum", "exclusiveMaximum", "maxLength", "maxItems", "maxProperties")
+
+local opaque: List<String> =
+  List("if", "then", "else", "not", "const", "dependentRequired", "dependentSchemas", "contains")
+
+local function compare(ctx: Ctx, path: String, b: Data, a: Data, seen: List<String>): List<Change> =
+  // Equal nodes are still walked: a reference inside one may name a definition
+  // that changed.
+  if (b is Boolean || a is Boolean)
+    if (a == b)
+      List()
+    else if (a == false)
+      List(change(ctx.document, path, true, "the schema now accepts nothing"))
+    else if (b == false)
+      List(change(ctx.document, path, false, "the schema now accepts anything"))
+    else
+      List()
+  else
+    let (rb = refOf(b))
+    let (ra = refOf(a))
+    let (key = "\(rb)|\(ra)|\(path)")
+      if (
+        rb != null
+          && rb == ra
+          && otherDocument(rb, ctx.rootBefore, ctx.setBefore)
+          && otherDocument(ra, ctx.rootAfter, ctx.setAfter)
+      )
+        List() // the same other document: compared on its own
+      else if ((rb != null || ra != null) && !seen.contains(key))
+        compare(
+          ctx,
+          path,
+          resolve(b, ctx.rootBefore, ctx.setBefore),
+          resolve(a, ctx.rootAfter, ctx.setAfter),
+          seen + List(key),
+        )
+      else
+        keywords(ctx, path, b, a, seen)
+
+local function bad(ctx: Ctx, path: String, msg: String): Change =
+  change(ctx.document, path, true, msg)
+
+local function fine(ctx: Ctx, path: String, msg: String): Change =
+  change(ctx.document, path, false, msg)
+
+local function keywords(ctx: Ctx, path: String, b: Data, a: Data, seen: List<String>): List<Change> =
+  let (tb = typesOf(b))
+  let (ta = typesOf(a))
+  let (eb = get(b, "enum"))
+  let (ea = get(a, "enum"))
+  let (pb = get(b, "pattern"))
+  let (pa = get(a, "pattern"))
+  let (reqB = asList(get(b, "required")))
+  let (reqA = asList(get(a, "required")))
+  let (propsB = get(b, "properties") ?? Map())
+  let (propsA = get(a, "properties") ?? Map())
+    // types
+    (
+      if (tb.isEmpty && !ta.isEmpty)
+        List(bad(ctx, path, "a type was added: \(ta.toList().join(" or "))"))
+      else if (!ta.isEmpty && tb.any((t) -> !covered(t, ta)))
+        List(
+          bad(
+            ctx,
+            path,
+            "type narrowed from \(tb.toList().join(" or ")) to \(ta.toList().join(" or "))",
+          ),
+        )
+      else if (!tb.isEmpty && ta.isEmpty)
+        List(fine(ctx, path, "the type constraint was removed"))
+      else
+        List()
+    )
+      // enum
+      + (
+        if (ea is List && !(eb is List))
+          List(bad(ctx, path, "an enum was added"))
+        else if (ea is List && eb is List && eb.any((v) -> !ea.contains(v)))
+          List(
+            bad(ctx, path, "enum member removed: \(eb.filter((v) -> !ea.contains(v)).join(", "))"),
+          )
+        else if (eb is List && !(ea is List))
+          List(fine(ctx, path, "the enum was removed"))
+        else
+          List()
+      )
+      // ranges and lengths
+      + lowerBounds.flatMap((k) -> bound(ctx, path, k, get(b, k), get(a, k), true))
+      + upperBounds.flatMap((k) -> bound(ctx, path, k, get(b, k), get(a, k), false))
+      // pattern
+      + (
+        if (pa != null && pb == null)
+          List(bad(ctx, path, "pattern added: \(pa)"))
+        else if (pa != null && pb != pa)
+          List(bad(ctx, path, "pattern changed from \(pb) to \(pa), assumed tightened"))
+        else if (pb != null && pa == null)
+          List(fine(ctx, path, "the pattern was removed"))
+        else
+          List()
+      )
+      // required, properties
+      + reqA
+        .filter((r) -> !reqB.contains(r))
+        .map((r) -> bad(ctx, path, "`\(r)` is newly required"))
+      + (propsB as Map).keys
+        .toList()
+        .flatMap((k) ->
+          if (!(propsA as Map).containsKey(k))
+            List(change(ctx.document, at(path, k), true, "the property was removed"))
+          else
+            compare(ctx, at(path, k), (propsB as Map)[k], (propsA as Map)[k], seen)
+        )
+      + (propsA as Map).keys
+        .toList()
+        .filter((k) -> !(propsB as Map).containsKey(k))
+        .map((k) -> change(ctx.document, at(path, k), false, "a property was added"))
+      // open and closed objects, items
+      + List("additionalProperties", "unevaluatedProperties")
+        .flatMap((k) -> closing(ctx, path, k, get(b, k), get(a, k), seen))
+      + (
+        if (get(a, "items") != null && get(b, "items") == null)
+          List(bad(ctx, path, "items were constrained"))
+        else if (get(a, "items") != null)
+          compare(ctx, at(path, "[]"), get(b, "items"), get(a, "items"), seen)
+        else
+          List()
+      )
+      + (
+        if (get(a, "propertyNames") != null && get(b, "propertyNames") != null)
+          compare(ctx, at(path, "<name>"), get(b, "propertyNames"), get(a, "propertyNames"), seen)
+        else
+          List()
+      )
+      // alternatives and conjunctions
+      + List("anyOf", "oneOf")
+        .flatMap((k) ->
+          asList(get(b, k))
+            .flatMap((alt) ->
+              if (
+                asList(get(a, k))
+                  .any((x) -> !compare(ctx, path, alt, x, seen).any((c) -> c.breaking))
+              )
+                List()
+              else
+                List(bad(ctx, path, "a `\(k)` alternative is no longer covered"))
+            )
+        )
+      + (
+        let (gained = asList(get(a, "allOf")).filter((m) -> !asList(get(b, "allOf")).contains(m)))
+          if (gained.isEmpty)
+            List()
+          else
+            List(bad(ctx, path, "`allOf` gained \(gained.length) member(s)"))
+      )
+      // what cannot be compared member by member
+      + opaque.flatMap((k) ->
+        if (get(b, k) != get(a, k)) List(bad(ctx, path, "`\(k)` changed")) else List()
+      )
+      + (
+        if (get(b, "default") != get(a, "default"))
+          List(fine(ctx, path, "the default changed"))
+        else
+          List()
+      )
+
+local function bound(
+  ctx: Ctx,
+  path: String,
+  k: String,
+  b: Any,
+  a: Any,
+  lower: Boolean,
+): List<Change> =
+  if (a == null && b == null)
+    List()
+  else if (a != null && b == null)
+    List(bad(ctx, path, "`\(k)` \(a) was added"))
+  else if (a == null)
+    List(fine(ctx, path, "`\(k)` was removed"))
+  else if (a == b)
+    List()
+  else if (if (lower) a > b else a < b)
+    List(bad(ctx, path, "`\(k)` narrowed from \(b) to \(a)"))
+  else
+    List(fine(ctx, path, "`\(k)` relaxed from \(b) to \(a)"))
+
+local function closing(
+  ctx: Ctx,
+  path: String,
+  k: String,
+  b: Any,
+  a: Any,
+  seen: List<String>,
+): List<Change> =
+  if (a == false && b != false)
+    List(change(ctx.document, path, true, "`\(k)` is now false: the object was open"))
+  else if (b == false && a != false)
+    List(change(ctx.document, path, false, "`\(k)` is no longer false: the object was closed"))
+  else if (a != null && b != null && a != false)
+    compare(ctx, at(path, "<name>"), b, a, seen)
+  else
+    List()

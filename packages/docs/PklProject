@@ -1,0 +1,13 @@
+amends "pkl:Project"
+
+import "../Release.pkl"
+
+package =
+  Release.metadata(
+    "contracts.docs",
+    "Generates a Markdown reference of a contract: every field with its type, whether it is required, its default, its constraints and whether it names a secret.",
+  )
+
+dependencies {
+  ["model"] = import("../model/PklProject")
+}

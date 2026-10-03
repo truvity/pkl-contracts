@@ -1,0 +1,33 @@
+/// Writes the vocabulary's probes as one-property documents, one file each,
+/// named `<ok|bad>-<property>-<n>.json`, for the validators of the conformance
+/// suite. The probes are the ones `test/Probes.pkl` generates from the
+/// annotations (the same ones Pkl's own enforcement is tested with).
+///
+///     pkl run --project-dir test test/conformance/Probes.pkl -- --dir <dir>
+extends "pkl:Command"
+
+import "@model/Model.pkl"
+
+import "../Probes.pkl"
+import "../Showcase.pkl"
+
+options: Options
+
+class Options {
+  /// The directory to write into.
+  @Flag { shortName = "d" }
+  dir: String
+}
+
+output {
+  files {
+    for (prop, probes in Probes.of(Model.moduleNode(Showcase))) {
+      for (i, pr in probes) {
+        ["\(options.dir)/\(pr.label)-\(prop)-\(i).json"] {
+          value = new Dynamic { [prop] = pr.value }
+          renderer = new JsonRenderer { omitNullProperties = false }
+        }
+      }
+    }
+  }
+}

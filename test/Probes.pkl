@@ -15,7 +15,7 @@
 /// generators.
 module contracts.test.Probes
 
-import "Model.pkl"
+import "@model/Model.pkl"
 
 /// One probe: whether the value should be accepted, and the value.
 class Probe {

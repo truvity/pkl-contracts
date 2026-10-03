@@ -10,12 +10,12 @@
 # what devbox names.
 
 pkl := "bin/pkl"
-packages := "packages/vocab packages/fragments packages/templates"
-projects := "packages/vocab packages/fragments packages/templates test examples/service"
+packages := "packages/vocab packages/fragments packages/templates packages/model packages/jsonschema packages/helm packages/typescript packages/python packages/docs"
+projects := "packages/vocab packages/fragments packages/templates packages/model packages/jsonschema packages/helm packages/typescript packages/python packages/docs test examples/service"
 
 # Everything CI requires
 [doc("Everything CI requires")]
-check: test lint example package leak-canary
+check: test lint example package leak-canary generated compat conformance conformance-kotlin
 
 # The tests: the vocabulary's probes against Pkl's own enforcement, the
 # authoring lint by reflection, and the fragments and templates in use.
@@ -59,12 +59,56 @@ example:
     diff <({{pkl}} eval --project-dir examples/service -f yaml examples/service/values.pkl) examples/service/values.yaml
     echo "example: renders as committed"
 
-# Build the three packages exactly as a release will publish them, into .out/,
+# Regenerate the worked example's artifacts (JSON Schema, the chart's values
+# schema, defaults and table, TypeScript with zod, Python with pydantic, the
+# Markdown reference) into examples/service/generated, the committed copy.
+[doc("Regenerate examples/service/generated")]
+generate:
+    hack/generate.sh
+
+# Regenerate into a temporary directory and compare with the committed copy, so
+# that a change to a generator or to the contract cannot leave it stale.
+[doc("Fail if examples/service/generated is stale")]
+generated:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    hack/generate.sh "$tmp/generated" >/dev/null
+    diff -r "$tmp/generated" examples/service/generated
+    echo "generated: examples/service/generated is current"
+
+# Compare the JSON Schemas generated for the worked example with the last
+# release tag's, and fail on a breaking change (a removed property, a newly
+# required one, a narrowed type, enum or range, a tightened pattern).
+[doc("Breaking-change check against the last release tag")]
+compat:
+    hack/compat.sh
+
+# Every validator, on every fixture and probe. Four JSON Schema engines (Ajv,
+# santhosh-tekuri, python-jsonschema; the fourth, networknt, is Kotlin's), zod,
+# pydantic, Go decoded through its generated structs, and Pkl itself. They must
+# all agree, and with the label. Needs the network the first time (npm, the Go
+# and Python modules).
+[doc("Cross-language conformance (no Kotlin)")]
+conformance:
+    cd test/conformance/ts && npm ci --no-audit --no-fund
+    uv run --no-project --with pyyaml==6.0.2 python test/conformance/run.py
+
+# The same, with Kotlin added: the classes pkl-codegen-kotlin generates, and
+# networknt. A recipe of its own because Gradle makes it the slow part.
+[doc("Cross-language conformance with Kotlin (slow: Gradle)")]
+conformance-kotlin:
+    cd test/conformance/ts && npm ci --no-audit --no-fund
+    uv run --no-project --with pyyaml==6.0.2 python test/conformance/run.py --kotlin
+
+# Build the packages exactly as a release will publish them, into .out/,
 # and check the metadata against the URIs GitHub will serve.
-[doc("Build the packages and check their metadata")]
+[doc("Build the packages, check their metadata, run the generators as packages")]
 package:
     {{pkl}} project package {{packages}} --output-path '.out/%{name}@%{version}'
     hack/package-check.sh
+    hack/package-smoke.sh
 
 # Resolve every project's dependencies, after a version or a dependency change.
 [doc("Resolve the PklProject.deps.json files")]

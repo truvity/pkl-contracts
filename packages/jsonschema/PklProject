@@ -1,0 +1,13 @@
+amends "pkl:Project"
+
+import "../Release.pkl"
+
+package =
+  Release.metadata(
+    "contracts.jsonschema",
+    "Generates JSON Schema (draft 2020-12) from a contract: the vocabulary's constraints as keywords, one document per shape, composed by $ref; and compares two sets of schemas for breaking changes.",
+  )
+
+dependencies {
+  ["model"] = import("../model/PklProject")
+}

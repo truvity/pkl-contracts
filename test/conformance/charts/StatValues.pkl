@@ -1,0 +1,25 @@
+/// The `stat` chart's default values, checked against its contract when the
+/// module is evaluated.
+amends "StatChart.pkl"
+
+config {
+  probes { address = ":7070" }
+  urls { address = "http://shortener-urls:8080" }
+  events {
+    nats { url = "nats://nats:4222" }
+    consumer {
+      stream = "SHORTENER_STAT"
+      durable = "stat"
+      subject = "shortener.redirect"
+    }
+  }
+}
+
+images {
+  stat {
+    registry = "registry.example.com"
+    repository = "example/shortener/stat"
+    tag = ""
+    digest = ""
+  }
+}

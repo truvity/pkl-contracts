@@ -1,0 +1,39 @@
+/// Generates JSON Schema (draft 2020-12) from the modules of a contract: one
+/// document for each shape annotated `@Schema`, written as `<key>.json` where
+/// the key is the tail of the document's `$id` after `/schemas/` (or its last
+/// path element).
+///
+///     pkl run --project-dir . package://.../contracts.jsonschema@<version>#/Generate.pkl \
+///       -- --dir schemas Config.pkl
+///
+/// The modules are given as arguments, because reflection cannot enumerate a
+/// module graph; a module that is itself a document, and each class or alias in
+/// one that is annotated `@Schema`, becomes a document.
+extends "pkl:Command"
+
+import "@model/Model.pkl"
+
+import "JsonSchema.pkl"
+
+options: Options
+
+class Options {
+  /// The directory to write into, relative to the working directory.
+  @Flag { shortName = "d" }
+  dir: String = "schemas"
+
+  /// The modules of the contract.
+  @Argument { convert = (path) -> new Import { uri = path } }
+  modules: Listing<Module>
+}
+
+output {
+  files {
+    for (k, n in Model.documents(options.modules.toList())) {
+      ["\(options.dir)/\(k).json"] {
+        value = JsonSchema.document(n)
+        renderer = new JsonRenderer { indent = "  " }
+      }
+    }
+  }
+}

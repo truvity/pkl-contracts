@@ -93,7 +93,9 @@ local problems: List<String> =
     )
 
 local sources: Set<String> =
-  read*("../packages/*/*.pkl").keys.map((uri) -> uri.split("/").last).toSet()
+  read*("../packages/{vocab,fragments,templates}/*.pkl").keys
+    .map((uri) -> uri.split("/").last)
+    .toSet()
 
 facts {
   ["the lint knows every module of the packages"] {
