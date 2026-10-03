@@ -7,6 +7,8 @@ under one version, so a heading covers all of them.
 
 ## Unreleased
 
+## v0.2.0 — 2026-10-03
+
 ### Packages
 
 - **`contracts.model`: the reflection every generator shares.** A contract's
