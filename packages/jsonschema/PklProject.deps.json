@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "resolvedDependencies": {
-    "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.model@0": {
+    "package://github.com/truvity/pkl-contracts/releases/download/v0.2.0/contracts.model@0": {
       "type": "local",
-      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.model@0.1.0",
+      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.2.0/contracts.model@0.2.0",
       "path": "../model"
     }
   }
