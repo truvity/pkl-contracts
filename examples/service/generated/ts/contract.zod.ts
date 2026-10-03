@@ -1,13 +1,13 @@
 // Generated from a contract by contracts.typescript. Do not edit.
 import { z } from "zod";
 
-const noNewline = (s: string): boolean => !s.includes("\n");
+const noLineBreak = (s: string): boolean => !/[\n\r\f\v\u0085\u2028\u2029]/.test(s);
 
 /** host:port as the configuration contract spells it today. It does NOT bound the port at 65535, because the hand-written pattern does not; `Port` is the stricter vocabulary a contract may move to. */
-export const HostPort = z.string().regex(/^[^\s]*:[0-9]{1,5}$/).refine(noNewline);
+export const HostPort = z.string().regex(/^[^\t \xA0  -   　]*:[0-9]{1,5}$/).refine(noLineBreak);
 export type HostPort = z.infer<typeof HostPort>;
 /** A PostgreSQL connection URL, by its scheme. */
-export const PostgresUrl = z.string().regex(/^postgres(ql)?:\/\//).refine(noNewline);
+export const PostgresUrl = z.string().regex(/^postgres(ql)?:\/\//).refine(noLineBreak);
 export type PostgresUrl = z.infer<typeof PostgresUrl>;
 /** A string of at least one character. */
 export const NonEmptyString = z.string().min(1);
@@ -15,11 +15,14 @@ export type NonEmptyString = z.infer<typeof NonEmptyString>;
 /** A whole number of at least one. */
 export const PositiveInt = z.number().int().min(1);
 export type PositiveInt = z.infer<typeof PositiveInt>;
+/** Kubernetes' own object shape, passed through unchanged. */
+export const OpenObject = z.looseObject({});
+export type OpenObject = z.infer<typeof OpenObject>;
 /** The lowest level a service writes. */
 export const LogLevel = z.enum(["debug", "info", "warn", "error"]);
 export type LogLevel = z.infer<typeof LogLevel>;
 /** An image digest, or empty when there is none. */
-export const ImageDigest = z.string().regex(/^(sha256:[0-9a-f]{64})?$/).refine(noNewline);
+export const ImageDigest = z.string().regex(/^(sha256:[0-9a-f]{64})?$/).refine(noLineBreak);
 export type ImageDigest = z.infer<typeof ImageDigest>;
 /** When a container image is pulled. */
 export const PullPolicy = z.enum(["Always", "IfNotPresent", "Never"]);
@@ -27,20 +30,17 @@ export type PullPolicy = z.infer<typeof PullPolicy>;
 /** A whole number of at least zero. */
 export const NonNegativeInt = z.number().int().min(0);
 export type NonNegativeInt = z.infer<typeof NonNegativeInt>;
-/** Kubernetes' own object shape, passed through unchanged. */
-export const OpenObject = z.looseObject({});
-export type OpenObject = z.infer<typeof OpenObject>;
 /** A path that starts at the root, the root itself included. */
-export const RootedPath = z.string().regex(/^\//).refine(noNewline);
+export const RootedPath = z.string().regex(/^\//).refine(noLineBreak);
 export type RootedPath = z.infer<typeof RootedPath>;
 /** An absolute path that is not the root. */
-export const AbsPath = z.string().regex(/^\/.+/).refine(noNewline);
+export const AbsPath = z.string().regex(/^\/[^\n]+/).refine(noLineBreak);
 export type AbsPath = z.infer<typeof AbsPath>;
 /** The protocol OpenTelemetry exports over. */
 export const OtelProtocol = z.enum(["grpc", "http/protobuf", "http/json"]);
 export type OtelProtocol = z.infer<typeof OtelProtocol>;
 /** The name of an environment variable. */
-export const EnvName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine(noNewline);
+export const EnvName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine(noLineBreak);
 export type EnvName = z.infer<typeof EnvName>;
 /** An open object that must carry `name`. */
 export const Named = z.looseObject({}).refine((o) => ["name"].every((k) => k in o));
@@ -68,6 +68,12 @@ export const Config_shape = {
   listen: z.lazy(() => Listen),
   /** The database the service keeps its records in. */
   postgres: z.lazy(() => Postgres),
+  /** How long what the service keeps is kept. A default that is a class, which differs from the class's own in `days`. */
+  retention: z.lazy(() => ConfigRetention).default({"days": 30, "keepForever": false}),
+  /** Labels put on what the service writes. A default that is an open object. */
+  labels: OpenObject.default({"team": "platform"}),
+  /** Where the service archives what it served. Absent means it does not. */
+  archive: z.lazy(() => ConfigArchive).optional(),
 };
 export const Config = z.strictObject(Config_shape);
 export type Config = z.infer<typeof Config>;
@@ -91,6 +97,28 @@ export const Postgres_shape = {
 };
 export const Postgres = z.strictObject(Postgres_shape);
 export type Postgres = z.infer<typeof Postgres>;
+
+/** How long what the service keeps is kept. */
+export const ConfigRetention_shape = {
+  /** Days before it is deleted. */
+  days: PositiveInt.default(7),
+  /** Keep it until somebody deletes it, whatever `days` says. */
+  keepForever: z.boolean().default(false),
+};
+export const ConfigRetention = z.strictObject(ConfigRetention_shape);
+export type ConfigRetention = z.infer<typeof ConfigRetention>;
+
+/** Where the service archives what it served. */
+export const ConfigArchive_shape = {
+  /** The bucket. Every install names its own, so the defaults leave it out and the schema requires it. */
+  bucket: NonEmptyString,
+  /** What every object's key begins with. */
+  prefix: NonEmptyString.default("echo/requests"),
+  /** How often a batch is written, in seconds: not more often than every ten. */
+  batchSeconds: z.number().int().min(10).default(60),
+};
+export const ConfigArchive = z.strictObject(ConfigArchive_shape);
+export type ConfigArchive = z.infer<typeof ConfigArchive>;
 
 /** The health listener. Separate from the service's own traffic, so that readiness is answerable when the service's listener is saturated, and so that a probe is not reachable from outside. */
 export const Probes_shape = {

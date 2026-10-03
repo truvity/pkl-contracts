@@ -26,20 +26,35 @@ local function ownDefaults(n: Model.Node): List<List<Any>> =
     .map((p) -> List(p.name, p.default))
     .sortBy((e) -> e[0] as String)
 
-/// The defaults at chart paths, for `values.yaml`.
-local function paths(prefix: String, c: Model.Cls): List<Dynamic> =
+/// The defaults at chart paths, for `values.yaml`. Where an object was given a
+/// default of its own, what is under it is that default's, not the class's:
+/// `over` is the object's default.
+local function paths(prefix: String, c: Model.Cls, over: Map?): List<Dynamic> =
   c.props.flatMap((p) ->
     let (dotted = if (prefix == "") p.name else "\(prefix).\(p.name)")
-      (
-        if (p.hasDefault)
-          List(new Dynamic { path = dotted; ["default"] = p.default })
-        else
-          List()
-      )
-        + (if (p.type.kind == "object") paths(dotted, p.type.cls) else List())
+    let (has = (over != null && over.containsKey(p.name)) || p.hasDefault)
+    let (value = if (over != null && over.containsKey(p.name)) over[p.name] else p.default)
+      (if (has) List(new Dynamic { path = dotted; ["default"] = value }) else List())
+        + (
+          if (p.type.kind == "object")
+            paths(dotted, p.type.cls, if (has && value is Map) value else null)
+          else
+            List()
+        )
   )
 
-local all: List<Model.Node> = Model.classes(docs.toMap().values.toList() + List(chartNode))
+/// The chart paths of every property that is set at install.
+local function atInstall(prefix: String, c: Model.Cls): List<String> =
+  c.props.flatMap((p) ->
+    let (dotted = if (prefix == "") p.name else "\(prefix).\(p.name)")
+      (if (p.setAtInstall) List(dotted) else List())
+        + (if (p.type.kind == "object") atInstall(dotted, p.type.cls) else List())
+  )
+
+/// The classes the generators that write one type per class (zod, pydantic, the
+/// reference) write: those of the documents. A chart's own classes are in its
+/// values schema and `values.yaml`, which the other checks read.
+local all: List<Model.Node> = Model.classes(docs.toMap().values.toList())
 
 output {
   renderer = new JsonRenderer { omitNullProperties = false }
@@ -58,6 +73,17 @@ output {
             .filter((p) -> p.hasDefault)
             .toMap((p) -> p.name, (p) -> p.default),
       )
-    chart = paths("", chartNode.cls)
+    chart = paths("", chartNode.cls, null)
+    // The properties the schema requires and the defaults leave out: per class
+    // (qname), and as chart paths.
+    classesAtInstall =
+      all.toMap(
+        (n) -> n.cls.qname,
+        (n) ->
+          n.cls.props
+            .filter((p) -> p.setAtInstall)
+            .map((p) -> p.name),
+      )
+    chartAtInstall = atInstall("", chartNode.cls)
   }
 }

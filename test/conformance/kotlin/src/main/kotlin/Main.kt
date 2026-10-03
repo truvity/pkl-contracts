@@ -67,6 +67,7 @@ fun main(args: Array<String>) {
                     "migrate" -> cfg.to<Migrate>()
                     "log" -> cfg.to<LogArchiver>()
                     "shortener" -> cfg.to<Shortener>()
+                    "installed" -> cfg.to<Installed>()
                     "showcase" -> cfg.to<Showcase>()
                     else -> error("no generated class for $schema")
                 }

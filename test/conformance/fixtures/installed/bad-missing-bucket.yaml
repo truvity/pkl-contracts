@@ -1,0 +1,2 @@
+probes: { address: ":7070" }
+store: { linkSeconds: 3600 }

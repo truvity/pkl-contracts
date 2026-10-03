@@ -1,0 +1,53 @@
+/// A service whose configuration has a value only an install can give, defaults
+/// that are objects, and fields whose rule is a bound of their own rather than a
+/// vocabulary type's.
+@A.Schema { id = "https://example.com/schemas/installed.json"; title = "installed" }
+module conformance.contract.Installed
+
+extends "@templates/ServiceConfig.pkl"
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// Where the service keeps what it writes.
+store: Store
+
+/// Kubernetes' resource requirements, given a default that is an open object.
+resources: V.OpenObject = new Dynamic { requests { cpu = "50m"; memory = "64Mi" } }
+
+/// Limits, given a default that is a class.
+limits: Limits = new Limits { cpu = "2"; memory = "2Gi" }
+
+/// Where the service keeps what it writes.
+class Store {
+  /// The bucket. Required of every install, and left out of the chart's defaults.
+  @A.SetAtInstall
+  bucket: V.NonEmptyString?
+  /// How long a signed link lives, in seconds: at least ten minutes.
+  @A.Range { min = 600 }
+  linkSeconds: V.PositiveInt = 3600
+  /// How long a finished job is kept, in seconds: at least two minutes.
+  @A.Range { min = 120 }
+  keepSeconds: V.PositiveInt?
+  /// The port a test double listens on; zero asks for any free one.
+  @A.Range { max = 65535 }
+  port: V.NonNegativeInt?
+  /// A generated password, which is at least sixteen characters.
+  @A.Length { min = 16 }
+  password: V.NonEmptyString?
+  /// A Kubernetes name, which is at most 253 characters.
+  @A.Length { max = 253 }
+  name: V.DnsName?
+  /// A gateway's request buffer, `256Ki`; absent means no policy.
+  buffer: V.BufferLimit?
+  /// A Kubernetes quantity; absent means unset.
+  memory: V.Quantity?
+}
+
+/// Compute limits.
+class Limits {
+  /// CPU, in cores.
+  cpu: V.Quantity = "1"
+  /// Memory.
+  memory: V.Quantity = "1Gi"
+}

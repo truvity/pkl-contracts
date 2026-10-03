@@ -1,0 +1,12 @@
+probes: { address: ":7070" }
+store:
+  bucket: "archive"
+  linkSeconds: 600
+  keepSeconds: 120
+  port: 0
+  password: "0123456789abcdef"
+  name: "archive.example"
+  buffer: "256Ki"
+  memory: "1.5Gi"
+resources: { requests: { cpu: "100m" } }
+limits: { cpu: "500m", memory: "512Mi" }

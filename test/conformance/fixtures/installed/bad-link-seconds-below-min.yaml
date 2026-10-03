@@ -1,0 +1,2 @@
+probes: { address: ":7070" }
+store: { bucket: "b", linkSeconds: 599 }

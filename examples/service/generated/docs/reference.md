@@ -17,23 +17,23 @@
 
 ## Types
 
-The constrained types the fields use. A pattern is a search, and never matches a string with a newline in it.
+The constrained types the fields use. A pattern is a search, and never matches a string with a line break in it.
 
 | Type | Kind | Constraints | Description |
 |---|---|---|---|
-| `HostPort` | string | matches `^[^\s]*:[0-9]{1,5}$`, never a newline | host:port as the configuration contract spells it today. It does NOT bound the port at 65535, because the hand-written pattern does not; `Port` is the stricter vocabulary a contract may move to. |
-| `PostgresUrl` | string | matches `^postgres(ql)?://`, never a newline | A PostgreSQL connection URL, by its scheme. |
+| `HostPort` | string | matches `^[^\t \xA0  -   　]*:[0-9]{1,5}$`, never a line break | host:port as the configuration contract spells it today. It does NOT bound the port at 65535, because the hand-written pattern does not; `Port` is the stricter vocabulary a contract may move to. |
+| `PostgresUrl` | string | matches `^postgres(ql)?://`, never a line break | A PostgreSQL connection URL, by its scheme. |
 | `NonEmptyString` | string | at least 1 character | A string of at least one character. |
 | `PositiveInt` | integer | at least 1 | A whole number of at least one. |
+| `OpenObject` | open |  | Kubernetes' own object shape, passed through unchanged. |
 | `LogLevel` | one of `debug`, `info`, `warn`, `error` |  | The lowest level a service writes. |
-| `ImageDigest` | string | matches `^(sha256:[0-9a-f]{64})?$`, never a newline | An image digest, or empty when there is none. |
+| `ImageDigest` | string | matches `^(sha256:[0-9a-f]{64})?$`, never a line break | An image digest, or empty when there is none. |
 | `PullPolicy` | one of `Always`, `IfNotPresent`, `Never` |  | When a container image is pulled. |
 | `NonNegativeInt` | integer | at least 0 | A whole number of at least zero. |
-| `OpenObject` | open |  | Kubernetes' own object shape, passed through unchanged. |
-| `RootedPath` | string | matches `^/`, never a newline | A path that starts at the root, the root itself included. |
-| `AbsPath` | string | matches `^/.+`, never a newline | An absolute path that is not the root. |
+| `RootedPath` | string | matches `^/`, never a line break | A path that starts at the root, the root itself included. |
+| `AbsPath` | string | matches `^/[^\n]+`, never a line break | An absolute path that is not the root. |
 | `OtelProtocol` | one of `grpc`, `http/protobuf`, `http/json` |  | The protocol OpenTelemetry exports over. |
-| `EnvName` | string | matches `^[A-Za-z_][A-Za-z0-9_]*$`, never a newline | The name of an environment variable. |
+| `EnvName` | string | matches `^[A-Za-z_][A-Za-z0-9_]*$`, never a line break | The name of an environment variable. |
 | `Named` | open | has the keys `name` | An open object that must carry `name`. |
 | `Mounted` | open | has the keys `name`, `mountPath` | An open object that must carry `name` and `mountPath`. |
 
@@ -75,6 +75,9 @@ Document `https://example.com/echo/schemas/config.json`.
 |---|---|---|---|---|---|
 | `listen` | Listen | yes |  |  | The listener the service's own traffic is served on. |
 | `postgres` | Postgres | yes |  |  | The database the service keeps its records in. |
+| `retention` | ConfigRetention | no | `{"days": 30, "keepForever": false}` |  | How long what the service keeps is kept. A default that is a class, which differs from the class's own in `days`. |
+| `labels` | OpenObject | no | `{"team": "platform"}` |  | Labels put on what the service writes. A default that is an open object. |
+| `archive` | ConfigArchive | no |  |  | Where the service archives what it served. Absent means it does not. |
 
 ### `Listen`
 
@@ -84,7 +87,7 @@ Document `https://github.com/truvity/policy/schemas/fragments/listen.json`.
 
 | Field | Type | Required | Default | Constraints | Description |
 |---|---|---|---|---|---|
-| `address` | HostPort | yes |  | matches `^[^\s]*:[0-9]{1,5}$`, never a newline | host:port, for example ":8080" or "127.0.0.1:8080". |
+| `address` | HostPort | yes |  | matches `^[^\t \xA0  -   　]*:[0-9]{1,5}$`, never a line break | host:port, for example ":8080" or "127.0.0.1:8080". |
 
 ### `Postgres`
 
@@ -94,9 +97,28 @@ Document `https://github.com/truvity/policy/schemas/fragments/postgres.json`.
 
 | Field | Type | Required | Default | Constraints | Description |
 |---|---|---|---|---|---|
-| `url` | PostgresUrl | yes |  | matches `^postgres(ql)?://`, never a newline | A connection URL without credentials, for example postgres://user@host:5432/dbname?sslmode=require. |
+| `url` | PostgresUrl | yes |  | matches `^postgres(ql)?://`, never a line break | A connection URL without credentials, for example postgres://user@host:5432/dbname?sslmode=require. |
 | `passwordEnv` | NonEmptyString | no |  | at least 1 character | **Names a secret.** The NAME of the environment variable holding the password. Unset means the connection needs none. |
 | `maxConnections` | PositiveInt | no | `10` | at least 1 | Pool size for this instance. Sized against the server's limit divided by the number of instances, not guessed. |
+
+### `ConfigRetention`
+
+How long what the service keeps is kept.
+
+| Field | Type | Required | Default | Constraints | Description |
+|---|---|---|---|---|---|
+| `days` | PositiveInt | no | `7` | at least 1 | Days before it is deleted. |
+| `keepForever` | boolean | no | `false` |  | Keep it until somebody deletes it, whatever `days` says. |
+
+### `ConfigArchive`
+
+Where the service archives what it served.
+
+| Field | Type | Required | Default | Constraints | Description |
+|---|---|---|---|---|---|
+| `bucket` | NonEmptyString | yes |  | at least 1 character | **Set at install.** The bucket. Every install names its own, so the defaults leave it out and the schema requires it. |
+| `prefix` | NonEmptyString | no | `"echo/requests"` | at least 1 character | What every object's key begins with. |
+| `batchSeconds` | PositiveInt | no | `60` | at least 10 | How often a batch is written, in seconds: not more often than every ten. |
 
 ### `Probes`
 
@@ -106,7 +128,7 @@ Document `https://github.com/truvity/policy/schemas/fragments/probes.json`.
 
 | Field | Type | Required | Default | Constraints | Description |
 |---|---|---|---|---|---|
-| `address` | HostPort | yes |  | matches `^[^\s]*:[0-9]{1,5}$`, never a newline | host:port for /health/live and /health/ready. |
+| `address` | HostPort | yes |  | matches `^[^\t \xA0  -   　]*:[0-9]{1,5}$`, never a line break | host:port for /health/live and /health/ready. |
 
 ### `Log`
 
@@ -164,7 +186,7 @@ Where the image is. A digest when there is one; a tag only when there is not. Le
 | `registry` | string | no |  |  | The registry host. Left out, the repository is read as the whole name. |
 | `repository` | NonEmptyString | yes |  | at least 1 character | The repository path, without the registry and without a tag. |
 | `tag` | string | no |  |  | The tag. Empty or absent when there is a digest. |
-| `digest` | ImageDigest | no |  | matches `^(sha256:[0-9a-f]{64})?$`, never a newline | The content digest, `sha256:` and 64 hex digits; empty when there is none. |
+| `digest` | ImageDigest | no |  | matches `^(sha256:[0-9a-f]{64})?$`, never a line break | The content digest, `sha256:` and 64 hex digits; empty when there is none. |
 
 ### `PlatformStrategy`
 
@@ -219,7 +241,7 @@ One probe's timing. Every field has the library's own default.
 
 | Field | Type | Required | Default | Constraints | Description |
 |---|---|---|---|---|---|
-| `path` | RootedPath | no |  | matches `^/`, never a newline | The path on the probe listener. Defaults to the contract's own. |
+| `path` | RootedPath | no |  | matches `^/`, never a line break | The path on the probe listener. Defaults to the contract's own. |
 | `periodSeconds` | PositiveInt | no |  | at least 1 | How often to probe, in seconds. |
 | `initialDelaySeconds` | NonNegativeInt | no |  | at least 0 | How long to wait after the start before the first probe, in seconds. |
 | `timeoutSeconds` | PositiveInt | no |  | at least 1 | How long one probe may take, in seconds. |
@@ -241,7 +263,7 @@ Where the platform mounts the workload identity. The files the component's own `
 | Field | Type | Required | Default | Constraints | Description |
 |---|---|---|---|---|---|
 | `csiDriver` | NonEmptyString | no |  | at least 1 character | The driver that mounts the identity. The platform's, so there is no default; required once the identity is mounted. |
-| `mountPath` | AbsPath | no |  | matches `^/.+`, never a newline | Defaults to /var/run/identity. |
+| `mountPath` | AbsPath | no |  | matches `^/[^\n]+`, never a line break | Defaults to /var/run/identity. |
 | `mount` | boolean | no |  |  | Defaults to whether `config.tls.mode` is permissive or strict. True mounts the identity into a component that presents none of its own, because the release does; false never mounts it. |
 
 ### `PlatformTelemetry`
@@ -282,7 +304,7 @@ How the file reaches the process. The path is ONE argument or ONE environment va
 | Field | Type | Required | Default | Constraints | Description |
 |---|---|---|---|---|---|
 | `fileName` | NonEmptyString | no |  | at least 1 character | Defaults to `<component>.yaml`. |
-| `mountPath` | AbsPath | no |  | matches `^/.+`, never a newline | The directory the ConfigMap is mounted at. Defaults to `/etc/<chart name>`. |
+| `mountPath` | AbsPath | no |  | matches `^/[^\n]+`, never a line break | The directory the ConfigMap is mounted at. Defaults to `/etc/<chart name>`. |
 | `pathFlag` | NonEmptyString | no |  | at least 1 character | The argument that carries the path. Defaults to `-config`. |
 | `pathEnv` | NonEmptyString | no |  | at least 1 character | **Names a secret.** When set, the path is passed in this environment variable instead of an argument. |
 

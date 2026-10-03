@@ -11,6 +11,8 @@ import "@fragments/Platform.pkl"
 import "@templates/ChartValues.pkl"
 import "@templates/ServiceConfig.pkl"
 
+import "conformance/contract/Installed.pkl"
+
 local renderer = new JsonRenderer {}
 
 /// The JSON of a value, forcing all of it: an error is Pkl's refusal.
@@ -113,5 +115,19 @@ facts {
     refuses(() -> (values) { bogus = 1 })
     refuses(() -> (values) { config { probes { address = "7070" } } })
     refuses(() -> (ChartValues) { config = okProbes; images { ["svc"] {} } })
+  }
+  ["a property's own bound is enforced when a document is rendered, and a value set at install may be left out"] {
+    local installed = (Installed) { probes { address = ":7070" }; store { linkSeconds = 600 } }
+    // Pkl's own types take the document without a bucket (the module of defaults
+    // leaves it out); the loader, the schema and the generators require it.
+    json(installed.output.value).length > 0
+    why(() -> (installed) { store { linkSeconds = 599 } }.output.value)
+      .contains("`store.linkSeconds` is 599")
+    refuses(() -> (installed) { store { password = "short" } }.output.value)
+    refuses(() -> (installed) { store { port = 65536 } }.output.value)
+    json((installed) { store { port = 0 } }.output.value).length > 0
+    // an object default is the class's, and the property's own overrides it
+    installed.resources.requests.cpu == "50m"
+    installed.limits.cpu == "2" && installed.limits.memory == "2Gi"
   }
 }

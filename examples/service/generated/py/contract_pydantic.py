@@ -14,9 +14,10 @@ from pydantic import (
 )
 
 
-def _no_newline(value: str) -> str:
-    if "\n" in value:
-        raise ValueError("a newline is not allowed")
+def _no_line_break(value: str) -> str:
+    # Every character that ends a line in some engine: LF, CR, FF, VT, NEL, LS, PS.
+    if any(c in value for c in "\n\r\f\v\x85\u2028\u2029"):
+        raise ValueError("a line break is not allowed")
     return value
 
 
@@ -50,19 +51,19 @@ class _Closed(BaseModel):
                     raise ValueError(f"{key}: null is not a value; omit the key")
         return data
 
-HostPort = Annotated[str, StringConstraints(pattern=r"^[^\s]*:[0-9]{1,5}$"), AfterValidator(_no_newline)]
-PostgresUrl = Annotated[str, StringConstraints(pattern=r"^postgres(ql)?://"), AfterValidator(_no_newline)]
+HostPort = Annotated[str, StringConstraints(pattern=r"^[^\t \xA0  -   　]*:[0-9]{1,5}$"), AfterValidator(_no_line_break)]
+PostgresUrl = Annotated[str, StringConstraints(pattern=r"^postgres(ql)?://"), AfterValidator(_no_line_break)]
 NonEmptyString = Annotated[str, StringConstraints(min_length=1)]
 PositiveInt = Annotated[int, BeforeValidator(_integral), Field(ge=1)]
+OpenObject = dict[str, Any]
 LogLevel = Literal["debug", "info", "warn", "error"]
-ImageDigest = Annotated[str, StringConstraints(pattern=r"^(sha256:[0-9a-f]{64})?$"), AfterValidator(_no_newline)]
+ImageDigest = Annotated[str, StringConstraints(pattern=r"^(sha256:[0-9a-f]{64})?$"), AfterValidator(_no_line_break)]
 PullPolicy = Literal["Always", "IfNotPresent", "Never"]
 NonNegativeInt = Annotated[int, BeforeValidator(_integral), Field(ge=0)]
-OpenObject = dict[str, Any]
-RootedPath = Annotated[str, StringConstraints(pattern=r"^/"), AfterValidator(_no_newline)]
-AbsPath = Annotated[str, StringConstraints(pattern=r"^/.+"), AfterValidator(_no_newline)]
+RootedPath = Annotated[str, StringConstraints(pattern=r"^/"), AfterValidator(_no_line_break)]
+AbsPath = Annotated[str, StringConstraints(pattern=r"^/[^\n]+"), AfterValidator(_no_line_break)]
 OtelProtocol = Literal["grpc", "http/protobuf", "http/json"]
-EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$"), AfterValidator(_no_newline)]
+EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$"), AfterValidator(_no_line_break)]
 Named = Annotated[dict[str, Any], AfterValidator(_has_keys(["name"]))]
 Mounted = Annotated[dict[str, Any], AfterValidator(_has_keys(["name", "mountPath"]))]
 
@@ -98,6 +99,13 @@ drain) and what it needs of its own."""
     listen: Listen
     #: The database the service keeps its records in.
     postgres: Postgres
+    #: How long what the service keeps is kept. A default that is a class, which
+    #: differs from the class's own in `days`.
+    retention: ConfigRetention = Field(default_factory=lambda: ConfigRetention.model_validate({"days": 30, "keepForever": False}))
+    #: Labels put on what the service writes. A default that is an open object.
+    labels: OpenObject = Field(default={"team": "platform"})
+    #: Where the service archives what it served. Absent means it does not.
+    archive: ConfigArchive | None = None
 
 
 class Listen(_Closed):
@@ -114,6 +122,25 @@ class Postgres(_Closed):
     passwordEnv: NonEmptyString | None = None
     #: Pool size for this instance. Sized against the server's limit divided by the number of instances, not guessed.
     maxConnections: PositiveInt = Field(default=10)
+
+
+class ConfigRetention(_Closed):
+    """How long what the service keeps is kept."""
+    #: Days before it is deleted.
+    days: PositiveInt = Field(default=7)
+    #: Keep it until somebody deletes it, whatever `days` says.
+    keepForever: bool = Field(default=False)
+
+
+class ConfigArchive(_Closed):
+    """Where the service archives what it served."""
+    #: The bucket. Every install names its own, so the defaults leave it out and the
+    #: schema requires it.
+    bucket: NonEmptyString
+    #: What every object's key begins with.
+    prefix: NonEmptyString = Field(default="echo/requests")
+    #: How often a batch is written, in seconds: not more often than every ten.
+    batchSeconds: Annotated[int, BeforeValidator(_integral), Field(ge=10)] = Field(default=60)
 
 
 class Probes(_Closed):

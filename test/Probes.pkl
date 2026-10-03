@@ -1,10 +1,12 @@
 /// Boundary probes for the vocabulary, generated from the annotations.
 ///
-/// Each alias is probed at and just outside its range, at and just under its
-/// minimum length, with its pattern's own examples, with every enum member and
-/// one that is not, and with a value of the wrong type. A pattern is probed one
-/// more way: each valid example with a newline at its end and at its start must
-/// be refused, because no pattern may admit one.
+/// Each alias, and each property that narrows a type with its own `@Range` or
+/// `@Length`, is probed at and just outside its range, at and just outside its
+/// length bounds, with its pattern's own examples, with every enum member and one
+/// that is not, and with a value of the wrong type. A pattern is probed one more
+/// way: each valid example with each LINE BREAK (LF, CR, FF, VT, NEL, LS, PS) at
+/// its end, and the first with each at its start, must be refused, because no
+/// pattern may admit one, in any engine.
 ///
 /// The expectation comes from the ANNOTATION. `ProbesTest.pkl` runs each probe
 /// against Pkl's own enforcement, so an alias whose lambda and annotation
@@ -29,6 +31,11 @@ class Probe {
   value: Any
 }
 
+/// A string of `n` filler characters, if the node admits it: a pattern may not.
+local function fits(n: Model.Node, s: String): Boolean =
+  n.pattern == null
+    || (!Model.lineBreaks.any((b) -> s.contains(b)) && s.contains(Regex(n.pattern.regex)))
+
 local function ok(reason: String, v: Any): Probe = new { label = "ok"; why = reason; value = v }
 local function bad(reason: String, v: Any): Probe = new { label = "bad"; why = reason; value = v }
 
@@ -52,11 +59,32 @@ function probesOf(n: Model.Node): List<Probe> =
       List()
   )
     + (
-      if (n.length != null && n.length.min != null)
-        List(
-          ok("minimum length", "x".repeat(n.length.min)),
-          bad("under the minimum length", "x".repeat(n.length.min - 1)),
+      if (n.length != null)
+        (
+          if (n.length.min != null && n.length.min > 0 && fits(n, "x".repeat(n.length.min)))
+            List(ok("minimum length", "x".repeat(n.length.min)))
+          else
+            List()
         )
+          + (
+            if (n.length.min != null && n.length.min > 0)
+              List(bad("under the minimum length", "x".repeat(n.length.min - 1)))
+            else
+              List()
+          )
+          + (
+            if (n.length.max != null && fits(n, "x".repeat(n.length.max)))
+              List(ok("maximum length", "x".repeat(n.length.max)))
+            else
+              List()
+          )
+          + (
+            if (n.length.max != null)
+              List(bad("over the maximum length", "x".repeat(n.length.max + 1)))
+            else
+              List()
+          )
+          + List(bad("a number for a string", 1))
       else
         List()
     )
@@ -64,8 +92,16 @@ function probesOf(n: Model.Node): List<Probe> =
       if (n.pattern != null)
         n.pattern.valid.toList().map((v) -> ok("valid example", v))
           + n.pattern.invalid.toList().map((v) -> bad("invalid example", v))
-          + n.pattern.valid.toList().map((v) -> bad("valid example, then a newline", v + "\n"))
-          + n.pattern.valid.toList().map((v) -> bad("a newline, then valid example", "\n" + v))
+          + n.pattern.valid
+            .toList()
+            .flatMap((v) ->
+              Model.lineBreaks.mapIndexed((i, b) ->
+                bad("valid example, then line break #\(i)", v + b)
+              )
+            )
+          + Model.lineBreaks.mapIndexed((i, b) ->
+            bad("line break #\(i), then valid example", b + n.pattern.valid.toList().first)
+          )
       else
         List()
     )

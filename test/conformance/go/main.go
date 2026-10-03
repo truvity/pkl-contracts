@@ -25,6 +25,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	yaml "go.yaml.in/yaml/v3"
 
+	"conformance.invalid/gen/installed"
 	"conformance.invalid/gen/logarchiver"
 	"conformance.invalid/gen/migrate"
 	"conformance.invalid/gen/platform"
@@ -60,6 +61,7 @@ var structs = map[string]func() any{
 	"migrate":   func() any { return &migrate.Migrate{} },
 	"log":       func() any { return &logarchiver.LogArchiverImpl{} },
 	"shortener": func() any { return &shortener.ShortenerImpl{} },
+	"installed": func() any { return &installed.InstalledImpl{} },
 	"platform":  func() any { return &platform.Platform{} },
 	"showcase":  func() any { return &showcase.Showcase{} },
 }

@@ -6,9 +6,21 @@ config:
   postgres:
     url: postgres://echo@db.example.com:5432/echo?sslmode=require
     maxConnections: 10
+  retention:
+    days: 30
+    keepForever: false
+  labels:
+    team: platform
+  archive:
+    prefix: echo/requests
+    batchSeconds: 60
 images:
   echo:
     registry: registry.example.com
     repository: example/echo
     tag: ''
     digest: ''
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
