@@ -1,0 +1,26 @@
+/// The envelope every service's configuration carries. A service extends this
+/// module and adds its own properties beside it:
+///
+///     extends "package://.../contracts.templates@<version>#/ServiceConfig.pkl"
+///
+/// What is in here is what EVERY component has, including a job that exits and
+/// a consumer that answers nothing: somewhere to report health, a log level,
+/// and a shutdown budget. A listener is not one of those, so it is not here.
+///
+/// The module is open so that a service can extend it, and its classes are
+/// closed, so a key that is not declared is refused: a typo must fail.
+@A.Schema { id = "https://github.com/truvity/policy/schemas/service.json"; title = "service" }
+open module contracts.templates.ServiceConfig
+
+import "@fragments/Fragments.pkl" as F
+import "@vocab/Annotations.pkl" as A
+
+/// The health listener. Required: every component can be probed.
+probes: F.Probes
+
+/// Structured logging. Absent means the service's own default level.
+log: F.Log?
+
+/// The shutdown budget. Absent means the service's own default, which is only
+/// correct if nothing external is counting.
+drain: F.Drain?

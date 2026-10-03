@@ -1,0 +1,14 @@
+amends "pkl:Project"
+
+import "../Release.pkl"
+
+package =
+  Release.metadata(
+    "contracts.templates",
+    "The two shapes a service's own contract starts from: the configuration envelope every service carries, and the values of a service chart (platform and config).",
+  )
+
+dependencies {
+  ["vocab"] = import("../vocab/PklProject")
+  ["fragments"] = import("../fragments/PklProject")
+}

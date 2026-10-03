@@ -1,0 +1,41 @@
+/// The values of a service chart that follows the library convention: two
+/// blocks, `platform` and `config`, and the image map a release stamps. The
+/// chart adds nothing of its own between them.
+///
+/// A chart's own contract extends this module and narrows what it knows:
+///
+///     extends "package://.../contracts.templates@<version>#/ChartValues.pkl"
+///     config: MyServiceConfig
+///     images: MyImages
+///
+/// where `MyServiceConfig` extends `ServiceConfig`, and annotates itself with
+/// `@Chart` from the vocabulary so that a generator treats it as a chart's
+/// values rather than a document of its own.
+open module contracts.templates.ChartValues
+
+import "@fragments/Platform.pkl"
+import "@vocab/Vocab.pkl" as V
+
+import "ServiceConfig.pkl"
+
+/// Not a value: Helm puts a key named for every sub-chart into the values it
+/// validates, and the library chart is one.
+class ServiceLib {
+  /// Helm's own `global` block, passed through unchanged.
+  global: V.OpenObject?
+}
+
+/// Not a value: see `ServiceLib`.
+`service-lib`: ServiceLib?
+
+/// What the platform provides this component: image, replicas, account,
+/// probes, identity, secrets, telemetry. Absent means the library's defaults.
+platform: Platform?
+
+/// The service's own configuration, rendered verbatim into its ConfigMap and
+/// nothing else. A chart narrows this to its own contract.
+config: ServiceConfig
+
+/// The image of each component, by name; a release stamps it. A chart narrows
+/// this to the components it has.
+images: Mapping<String, Platform.PlatformImage>

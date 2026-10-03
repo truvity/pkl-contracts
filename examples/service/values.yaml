@@ -1,0 +1,14 @@
+config:
+  probes:
+    address: :7070
+  listen:
+    address: :8080
+  postgres:
+    url: postgres://echo@db.example.com:5432/echo?sslmode=require
+    maxConnections: 10
+images:
+  echo:
+    registry: registry.example.com
+    repository: example/echo
+    tag: ''
+    digest: ''

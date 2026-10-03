@@ -1,0 +1,24 @@
+/// The defaults the example chart ships, checked against its contract when this
+/// module is evaluated and rendered as `values.yaml`:
+///
+///     bin/pkl eval --project-dir examples/service -f yaml examples/service/values.pkl
+amends "Chart.pkl"
+
+config {
+  listen { address = ":8080" }
+  probes { address = ":7070" }
+  postgres { url = "postgres://echo@db.example.com:5432/echo?sslmode=require" }
+}
+
+images {
+  echo {
+    registry = "registry.example.com"
+    repository = "example/echo"
+    tag = ""
+    digest = ""
+  }
+}
+
+output {
+  renderer = new YamlRenderer {}
+}
