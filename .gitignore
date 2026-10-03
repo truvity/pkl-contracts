@@ -1,0 +1,12 @@
+# Devbox
+.devbox/
+
+# `just package` output: the release assets, built locally
+/.out/
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/

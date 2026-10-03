@@ -1,0 +1,11 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>truvity/ci-workflows"
+  ],
+  "description": "devbox.json and devbox.lock are ignored because the devbox parity job (truvity/ci-workflows docs/devbox-update.md) owns them: it moves the devbox packages and the lockfile together in one pull request, and a Renovate bump of either file alone would leave them disagreeing. The pinned Pkl in bin/pkl is not a Renovate dependency: a bump is a reviewed change of the version and four checksums together, and `just vuln` checks the checksums against GitHub's.",
+  "ignorePaths": [
+    "devbox.json",
+    "devbox.lock"
+  ]
+}
