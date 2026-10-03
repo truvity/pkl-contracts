@@ -9,10 +9,17 @@ under one version, so a heading covers all of them.
 
 ### Features
 
-This minor adds vocabulary and annotation features, and removes nothing: a contract
-that generated before generates the same schemas now (`just compat` reports no
-breaking change against v0.3.1).
+This minor adds vocabulary and annotation features and narrows one vocabulary type
+(see the breaking entry below); a contract that does not use `OtelProtocol` generates
+the same schemas as before.
 
+- **Breaking: `OtelProtocol` no longer admits `http/json`.** It is now
+  `"grpc" | "http/protobuf"`. The Go SDK's `autoexport` (v0.71.0) refuses any other
+  value at startup (`errInvalidOTLPProtocol`) and `otlptracehttp` always sends
+  `application/x-protobuf`; the Python and TypeScript exporters are fixed to
+  HTTP/protobuf, so a contract that allowed `http/json` allowed a value that
+  crashed the service. A consumer that set `http/json` (a `telemetry.protocol` or
+  any field of type `OtelProtocol`) must use `http/protobuf` or `grpc`.
 - **Exclusive bounds: `@Range { exclusiveMin; exclusiveMax }`.** "Greater than zero"
   is `exclusiveMin = 0`; either end may be exclusive and combined with the other
   side's `min` or `max`, and a range that leaves no value (`exclusiveMin = 1; max = 1`)
@@ -42,7 +49,6 @@ breaking change against v0.3.1).
   RFC 1123 label of at most 63 characters; an optional one is `DnsLabel?`),
   `StatusCodeList` (`^[A-Z_]+(\|[A-Z_]+)*$`, status code names joined by a bar) and
   `GatewayTlsMode` (`"off" | "permissive"`, distinct from `TlsMode`).
-  `OtelProtocol` is unchanged.
 - **The reference lists a class's rules.** A class or alias with rules across fields
   has a "Rules across fields" list in the generated reference.
 

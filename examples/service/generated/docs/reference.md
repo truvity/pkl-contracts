@@ -36,7 +36,7 @@ The constrained types the fields use. A pattern is a search, and never matches a
 | `NonNegativeInt` | integer | at least 0 | A whole number of at least zero. |
 | `RootedPath` | string | matches `^/`, never a line break | A path that starts at the root, the root itself included. |
 | `AbsPath` | string | matches `^/[^\n]+`, never a line break | An absolute path that is not the root. |
-| `OtelProtocol` | one of `grpc`, `http/protobuf`, `http/json` |  | The protocol OpenTelemetry exports over. |
+| `OtelProtocol` | one of `grpc`, `http/protobuf` |  | The protocol OpenTelemetry exports over. `http/json` is absent on purpose: it is in the OpenTelemetry specification, but the Go SDK's exporter selection (`autoexport`) refuses it at startup and its HTTP exporter always sends protobuf, and the Python and TypeScript exporters are fixed to HTTP/protobuf, so a contract that admitted it would admit a value that stops a service from starting. |
 | `EnvName` | string | matches `^[A-Za-z_][A-Za-z0-9_]*$`, never a line break | The name of an environment variable. |
 | `Named` | open | has the keys `name` | An open object that must carry `name`. |
 | `Mounted` | open | has the keys `name`, `mountPath` | An open object that must carry `name` and `mountPath`. |
