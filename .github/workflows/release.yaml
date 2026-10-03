@@ -16,7 +16,7 @@ jobs:
   release:
     permissions:
       contents: write
-    uses: truvity/ci-workflows/.github/workflows/release-pkl.yaml@a687cf1469cf4789e218ed25625abe25e722431d # v3.24.1
+    uses: truvity/ci-workflows/.github/workflows/release-pkl.yaml@58d470dff71c732e208f47a80bb6c5d741e016a7 # v3.25.0
     with:
       version-command: sed -n 's/^version = "\(.*\)"$/\1/p' packages/Release.pkl
       pkl-command: bin/pkl
