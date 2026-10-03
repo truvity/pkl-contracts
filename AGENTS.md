@@ -52,9 +52,18 @@ by hand in that toolchain: `hack/conf.sh <command>`.
   version into a `PklProject` or a module; `hack/lint.sh` refuses it.
 - **A constraint is written once, in the vocabulary.** A fragment that wants a
   new rule adds an alias to `Vocab.pkl` (with its `@A.Pattern`, `@A.Range` or
-  `@A.Length`, from the same constant) and a property in `test/Showcase.pkl`.
+  `@A.Length`, from the same constant) and a property in `test/Showcase.pkl`. A
+  rule that is only a bound is `@A.Range` or `@A.Length` on the property itself,
+  over a vocabulary type; Pkl enforces it through `contracts.vocab.Check`, which
+  the templates call in their `output`.
+- **`@A.SetAtInstall` is nullable and required at once.** The Pkl type is `T?`
+  (so the module of defaults can leave it out), the annotation makes every
+  generator and the test loader require it. Never beside a default.
+- **`X | Y?` is a trap.** Write `(X | Y)?`; the lint and the model refuse the
+  other. And a literal union used in two places is an enum in the vocabulary.
 - **`matches` is a full match; a pattern is a search.** Use the vocabulary's
-  `search` helper, which also refuses a newline. `$` means different things in
+  `search` helper, which also refuses every line break (`lineBreaks`: LF, CR, FF,
+  VT, NEL, LS, PS) and is written with no `.`, `\s`, `\d`, `\w` or `\b`. `$` means different things in
   different engines, and the probes check that none is admitted.
 - **Reflection cannot see a constraint.** That is why a constraint is stated as
   an annotation too. A lambda and an annotation that disagree fail
