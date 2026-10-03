@@ -136,6 +136,21 @@ local const durationRe = #"^[0-9]+(ns|us|µs|ms|s|m|h)$"#
 }
 typealias GoDuration = String(search(this, durationRe))
 
+local const promDurationRe = #"^[0-9]+(s|m|h)$"#
+
+/// A duration in Prometheus' spelling: whole seconds, minutes or hours, `90s`,
+/// `15m`, `2h`. Narrower than `GoDuration`, which also admits `ns`, `us` and
+/// `ms`, units Prometheus' `for`, `interval` and range selectors do not read.
+/// Never empty: a duration that may be left out is `PromDuration?`, absent, and
+/// not a `""` that means "none" (the rule of every vocabulary type: an optional
+/// field is absent or has a value).
+@A.Pattern {
+  regex = promDurationRe
+  valid { "90s"; "15m"; "2h"; "0s" }
+  invalid { ""; "10"; "1.5m"; "10 m"; "m"; "500ms"; "1d"; "10s5m" }
+}
+typealias PromDuration = String(search(this, promDurationRe))
+
 // ------------------------------------------------------------------- strings
 
 /// A string of at least one character.
@@ -268,6 +283,34 @@ local const dnsLabelRe = #"^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"#
 @A.Pattern { regex = dnsLabelRe; valid { ""; "a-b.c" }; invalid { "-a"; "A"; "a_b" } }
 typealias DnsName = String(search(this, dnsLabelRe))
 
+local const dnsLabelStrictRe = #"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"#
+
+/// An RFC 1123 DNS label, as Kubernetes spells a namespace: lower-case letters,
+/// digits and hyphens, starting and ending with a letter or a digit, at most 63
+/// characters. Never empty, and never dotted (`DnsName` is the dotted one). A
+/// field that may be left out (a namespace, a cluster name) is `DnsLabel?`,
+/// absent, and not a `""`.
+@A.Pattern {
+  regex = dnsLabelStrictRe
+  valid { "a"; "kube-system"; "a1-b2"; "0" }
+  invalid { ""; "-a"; "a-"; "A"; "a_b"; "a.b"; "a b" }
+}
+@A.Length { max = 63 }
+typealias DnsLabel = String(search(this, dnsLabelStrictRe), length <= 63)
+
+local const statusCodesRe = #"^[A-Z_]+(\|[A-Z_]+)*$"#
+
+/// A list of status code names joined by a bar, `INTERNAL|UNAVAILABLE`: upper-case
+/// letters and underscores (a gRPC code's spelling), the shape a regular
+/// expression alternation of them takes in a query. At least one code, and no
+/// empty member.
+@A.Pattern {
+  regex = statusCodesRe
+  valid { "INTERNAL"; "INTERNAL|DATA_LOSS"; "A|B|C" }
+  invalid { ""; "internal"; "A|"; "|A"; "A||B"; "A B"; "A,B"; "A-B" }
+}
+typealias StatusCodeList = String(search(this, statusCodesRe))
+
 // --------------------------------------------------------------------- enums
 
 /// The lowest level a service writes.
@@ -275,6 +318,12 @@ typealias LogLevel = "debug" | "info" | "warn" | "error"
 
 /// How a workload's transport is authenticated.
 typealias TlsMode = "off" | "permissive" | "strict"
+
+/// How a gateway's listener treats mutual TLS: `off` serves cleartext only,
+/// `permissive` serves both. Not `TlsMode`: a gateway has no `strict` (a listener
+/// that refuses every cleartext client is a different decision, taken by its
+/// own setting), so the value must not be spellable.
+typealias GatewayTlsMode = "off" | "permissive"
 
 /// What a page's content security policy does.
 typealias CspMode = "off" | "report-only" | "enforce"
