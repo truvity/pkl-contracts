@@ -29,6 +29,13 @@ diff against the last release tag, and the cross-language conformance suite
 (Kotlin is its own recipe, `conformance-kotlin`: Gradle is slow). It needs the network only for
 the first run (devbox, and the Pkl release `bin/pkl` caches).
 
+The root devbox is lean on purpose (just, lefthook, jq, editorconfig-checker,
+Python for the package smoke test), because every CI job installs it. Go, Node,
+uv, a JDK and Gradle live in `test/conformance/devbox.json` (with its own
+`devbox.lock`); `just conformance` and `just conformance-kotlin` reach them
+through `hack/conf.sh`, and devbox installs them on first use. To run something
+by hand in that toolchain: `hack/conf.sh <command>`.
+
 ## Traps
 
 - **Run Pkl as `bin/pkl`**, never a `pkl` from the machine. It is pinned to

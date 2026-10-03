@@ -1,32 +1,12 @@
 {
   "packages": {
-    "just":                 "1.58.0",
-    "just-lsp":             "0.6.2",
-    "lefthook":             "2.1.10",
+    "just": "1.58.0",
+    "just-lsp": "0.6.2",
+    "lefthook": "2.1.10",
     "editorconfig-checker": "4.0.2",
-    "jq":                   "1.8.1",
-    "go": {
-      "version":        "1.27.0",
-      "disable_plugin": true
-    },
-    "uv": {
-      "version":        "0.12.5",
-      "disable_plugin": true
-    },
+    "jq": "1.8.1",
     "python": {
-      "version":        "3.14.4",
-      "disable_plugin": true
-    },
-    "temurin-bin": {
-      "version":        "21.0.8",
-      "disable_plugin": true
-    },
-    "gradle": {
-      "version":        "8.14.4",
-      "disable_plugin": true
-    },
-    "nodejs": {
-      "version":        "26",
+      "version": "3.14.4",
       "disable_plugin": true
     }
   },

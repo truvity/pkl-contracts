@@ -7,6 +7,13 @@ under one version, so a heading covers all of them.
 
 ## Unreleased
 
+### Tooling
+
+- The root devbox no longer installs Go, Node, uv, a JDK or Gradle. They moved to
+  `test/conformance/devbox.json`, which only `just conformance` and
+  `just conformance-kotlin` use (through `hack/conf.sh`), so every other CI job
+  installs far less.
+
 ## v0.2.0 — 2026-10-03
 
 ### Packages
