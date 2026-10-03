@@ -198,7 +198,9 @@ needed fetching would fail):
 | `pkl` | Pkl's own enforcement, through `test/Load.pkl`: the oracle |
 
 They must all give the verdict the fixture's name says (`ok-` accepted, `bad-`
-refused). The Kotlin half is `just conformance-kotlin`, a recipe of its own because
+refused). The suite's toolchain (Go, Node, uv, a JDK, Gradle) is its own devbox,
+`test/conformance/devbox.json`, so that the other recipes do not install it;
+the recipes enter it through `hack/conf.sh`. The Kotlin half is `just conformance-kotlin`, a recipe of its own because
 Gradle makes it the slow part.
 
 ### What the engines still disagree on

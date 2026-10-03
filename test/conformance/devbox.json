@@ -1,0 +1,32 @@
+{
+  "packages": {
+    "go": {
+      "version": "1.27.0",
+      "disable_plugin": true
+    },
+    "uv": {
+      "version": "0.12.5",
+      "disable_plugin": true
+    },
+    "python": {
+      "version": "3.14.4",
+      "disable_plugin": true
+    },
+    "temurin-bin": {
+      "version": "21.0.8",
+      "disable_plugin": true
+    },
+    "gradle": {
+      "version": "8.14.4",
+      "disable_plugin": true
+    },
+    "nodejs": {
+      "version": "26",
+      "disable_plugin": true
+    }
+  },
+  "shell": {
+    "init_hook": [],
+    "scripts": {}
+  }
+}
