@@ -4,7 +4,7 @@
 # (`pkl-codegen-kotlin`, from Pkl itself). Both are pinned here, with the Pkl
 # release they need, and the Kotlin tool is checked against a pinned digest.
 #
-#   hack/codegen.sh go     [pkl-gen-go options] <module>...
+#   hack/codegen.sh go     [--project-dir <dir>] [pkl-gen-go options] <module>...
 #   hack/codegen.sh kotlin [pkl-codegen-kotlin options] <module>...
 #
 # Options are the generator's own (`--project-dir`, `--output-path` for Go and
@@ -29,7 +29,10 @@ cache="${XDG_CACHE_HOME:-$HOME/.cache}/pkl-contracts/codegen"
 case "${1:-}" in
   go)
     shift
-    exec "$here/bin/pkl" run "$go_generator" -- "$@"
+    # --project-dir is Pkl's own option, not the generator's: it goes first.
+    project=()
+    if [ "${1:-}" = --project-dir ]; then project=(--project-dir "$2"); shift 2; fi
+    exec "$here/bin/pkl" run "${project[@]}" "$go_generator" -- "$@"
     ;;
   kotlin)
     shift
