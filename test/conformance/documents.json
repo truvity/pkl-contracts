@@ -6,6 +6,7 @@
   "prober": {"schema": "prober.json", "module": "conformance/contract/Prober.pkl"},
   "migrate": {"schema": "migrate.json", "module": "conformance/contract/Migrate.pkl"},
   "log": {"schema": "log.json", "module": "conformance/contract/LogArchiver.pkl"},
+  "installed": {"schema": "installed.json", "module": "conformance/contract/Installed.pkl"},
   "shortener": {"schema": "shortener.json", "module": "conformance/contract/Shortener.pkl"},
   "platform": {"schema": "fragments/platform.json", "module": "conformance/PlatformRef.pkl"},
   "showcase": {"schema": "showcase.json", "module": "Showcase.pkl"}

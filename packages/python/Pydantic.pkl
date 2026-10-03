@@ -12,10 +12,14 @@
 ///   - an integral float is an integer: strict mode refuses `20.0` for an
 ///     `int`, so an integer is read through a validator that accepts a float
 ///     with no fractional part, and nothing else;
-///   - a pattern is a search that never admits a newline: pydantic's own
+///   - a pattern is a search that never admits a line break: pydantic's own
 ///     regular expressions are a search, and `$` matches only at the very end,
-///     but a pattern with no `$` would admit a newline, so every pattern is
-///     paired with a validator that refuses one.
+///     but a pattern with no `$` would admit a newline, and other engines stop
+///     at other line breaks, so every pattern is paired with a validator that
+///     refuses any of them (LF, CR, FF, VT, NEL, LS, PS);
+///   - a default is any JSON value: an object default of an open object is a
+///     plain `dict`, and one of a class is built through that class, so that it
+///     is the model and not a dictionary.
 module contracts.python.Pydantic
 
 import "@model/Model.pkl"
@@ -27,6 +31,8 @@ local function lit(v: Any): String =
     (if (v) "True" else "False")
   else if (v is List)
     "[\(v.map((e) -> lit(e)).join(", "))]"
+  else if (v is Map)
+    "{\(v.entries.map((e) -> "\(lit(e.first)): \(lit(e.second))").join(", "))}"
   else
     "\(v)"
 
@@ -58,7 +64,7 @@ local function inner(n: Model.Node): String =
           if (n.length?.max != null) "max_length=\(n.length.max)" else null,
           if (n.pattern != null) "pattern=\(rawStr(n.pattern.regex))" else null,
         ),
-      ))\(if (n.pattern != null) "), AfterValidator(_no_newline)]" else ")]")"
+      ))\(if (n.pattern != null) "), AfterValidator(_no_line_break)]" else ")]")"
   else if (n.kind == "integer")
     "Annotated[int, BeforeValidator(_integral)\(range(n))]"
   else if (n.kind == "number")
@@ -96,7 +102,9 @@ local function field(p: Model.Prop): String =
   comment(p.doc, "    ")
     + "    \(p.name): \(ann(p.type))\(if (!p.required && !p.hasDefault) " | None" else "")"
     + (
-      if (p.hasDefault)
+      if (p.hasDefault && p.type.kind == "object")
+        " = Field(default_factory=lambda: \(p.type.alias ?? p.type.cls.qname).model_validate(\(lit(p.default))))"
+      else if (p.hasDefault)
         " = Field(default=\(lit(p.default)))"
       else if (!p.required)
         " = None"
@@ -158,9 +166,10 @@ local header: String =
   )
 
 
-  def _no_newline(value: str) -> str:
-      if "\n" in value:
-          raise ValueError("a newline is not allowed")
+  def _no_line_break(value: str) -> str:
+      # Every character that ends a line in some engine: LF, CR, FF, VT, NEL, LS, PS.
+      if any(c in value for c in "\n\r\f\v\x85\u2028\u2029"):
+          raise ValueError("a line break is not allowed")
       return value
 
 

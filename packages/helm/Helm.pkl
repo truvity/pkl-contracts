@@ -28,8 +28,12 @@ function valuesSchema(root: Model.Node): Dynamic =
       }
     }
 
-/// The chart's default values, from an instance of its contract.
-function valuesYaml(values: Any): String = new YamlRenderer {}.renderDocument(values)
+/// The chart's default values, from a module that amends its contract. What is
+/// rendered is the module's own `output.value`, which a template makes the module
+/// checked against the bounds its properties carry (`contracts.vocab.Check`), so
+/// a default that breaks one fails here as it does under `pkl eval`.
+function valuesYaml(values: Module): String =
+  new YamlRenderer {}.renderDocument(values.output.value)
 
 /// One row of the values table.
 class Row {
@@ -44,6 +48,9 @@ class Row {
 
   /// Whether the value must be given: required, and so is everything it is in.
   required: Boolean
+
+  /// Whether the value is required of the install and absent from the defaults.
+  setAtInstall: Boolean
 
   /// What the contract says about it.
   doc: String
@@ -65,6 +72,7 @@ local function rows(prefix: String, p: Model.Prop, within: Boolean): List<Row> =
         type = Model.typeLabel(t)
         default = if (p.hasDefault) "`\(Model.literal(p.default))`" else ""
         required = within && p.required
+        setAtInstall = p.setAtInstall
         doc = firstParagraph(p.doc)
       })
 
@@ -78,6 +86,6 @@ function readme(root: Model.Node): String =
 
     | Key | Type | Default | Description |
     |---|---|---|---|
-    \(all.map((r) -> "| `\(r.path)` | \(r.type.replaceAll("|", "\\|")) | \(r.default) | \(if (r.required) "**Required.** " else "")\(r.doc) |").join("\n"))
+    \(all.map((r) -> "| `\(r.path)` | \(r.type.replaceAll("|", "\\|")) | \(r.default) | \(if (r.setAtInstall) "**Set at install.** " else if (r.required) "**Required.** " else "")\(r.doc) |").join("\n"))
 
     """

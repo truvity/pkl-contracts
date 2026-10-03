@@ -22,7 +22,11 @@ local function propRow(p: Model.Prop): List<String> =
     if (p.required) "yes" else "no",
     if (p.hasDefault) code(Model.literal(p.default)) else "",
     cell(Model.constraintsOf(p.type).join("; ")),
-    cell((if (p.secret) "**Names a secret.** " else "") + (p.doc ?? "")),
+    cell(
+      (if (p.setAtInstall) "**Set at install.** " else "")
+        + (if (p.secret) "**Names a secret.** " else "")
+        + (p.doc ?? ""),
+    ),
   )
 
 local function classSection(c: Model.Cls, n: Model.Node): String =
@@ -80,7 +84,7 @@ function render(roots: Mapping<String, Model.Node>): String =
           .entries
           .map((e) -> List("`\(e.first)`", cell(e.second.schema.title), "`\(e.second.schema.id)`")),
       )
-      + "\n## Types\n\nThe constrained types the fields use. A pattern is a search, and never matches a string with a newline in it.\n\n"
+      + "\n## Types\n\nThe constrained types the fields use. A pattern is a search, and never matches a string with a line break in it.\n\n"
       + table(
         List("Type", "Kind", "Constraints", "Description"),
         Model.aliases(ns).map((a) -> aliasRow(a)),
