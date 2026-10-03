@@ -1,0 +1,83 @@
+/// Helm artifacts from a chart's values contract: `values.schema.json`, composed
+/// so that Helm validates offline (every document the values refer to is
+/// embedded under `$defs` by its `$id`, which Helm cannot fetch), the defaults
+/// as `values.yaml`, and a table of every value for the README.
+module contracts.helm.Helm
+
+import "@jsonschema/JsonSchema.pkl"
+import "@model/Model.pkl"
+
+/// The composed schema of a chart whose values class is `root`.
+function valuesSchema(root: Model.Node): Dynamic =
+  let (
+    docs =
+      Model
+        .walk(root)
+        .filter((n) -> n.schema != null)
+        .distinctBy((n) -> n.schema.id)
+  )
+    new Dynamic {
+      ["$schema"] = JsonSchema.schemaUri
+      title = root.chart.title
+      when (root.cls.doc != null) { description = root.cls.doc }
+      ...JsonSchema.objectBody(root.cls, "additionalProperties")
+      ["$defs"] = new Dynamic {
+        for (d in docs) {
+          [d.schema.id] = JsonSchema.documentIn(d, false)
+        }
+      }
+    }
+
+/// The chart's default values, from an instance of its contract.
+function valuesYaml(values: Any): String = new YamlRenderer {}.renderDocument(values)
+
+/// One row of the values table.
+class Row {
+  /// The dotted path of the value.
+  path: String
+
+  /// What kind of value it is.
+  type: String
+
+  /// The default, as written in a document, or empty.
+  default: String
+
+  /// Whether the value must be given: required, and so is everything it is in.
+  required: Boolean
+
+  /// What the contract says about it.
+  doc: String
+}
+
+local function firstParagraph(d: String?): String =
+  (d ?? "").split("\n\n").first.replaceAll("\n", " ").replaceAll("|", "\\|")
+
+local function rows(prefix: String, p: Model.Prop, within: Boolean): List<Row> =
+  let (dotted = if (prefix == "") p.name else "\(prefix).\(p.name)")
+  let (t = p.type)
+    if (t.kind == "object" && !t.cls.props.isEmpty)
+      t.cls.props.flatMap((c) -> rows(dotted, c, within && p.required))
+    else if (t.kind == "map" && t.items.kind == "object" && !t.items.cls.props.isEmpty)
+      t.items.cls.props.flatMap((c) -> rows("\(dotted).<name>", c, false))
+    else
+      List(new Row {
+        path = dotted
+        type = Model.typeLabel(t)
+        default = if (p.hasDefault) "`\(Model.literal(p.default))`" else ""
+        required = within && p.required
+        doc = firstParagraph(p.doc)
+      })
+
+/// A Markdown table of every value of the chart.
+function readme(root: Model.Node): String =
+  let (all = root.cls.props.flatMap((p) -> rows("", p, true)))
+    """
+    <!-- Generated from the chart's values contract. Do not edit. -->
+
+    ## Values
+
+    | Key | Type | Default | Description |
+    |---|---|---|---|
+    \(all.map((r) -> "| `\(r.path)` | \(r.type.replaceAll("|", "\\|")) | \(r.default) | \(if (r.required) "**Required.** " else "")\(r.doc) |").join("\n"))
+
+    """

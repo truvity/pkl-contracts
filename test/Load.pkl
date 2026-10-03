@@ -1,8 +1,13 @@
 /// Reads a parsed YAML document into a typed instance of a contract module,
 /// so that Pkl's own enforcement (types, closed classes, alias constraints)
-/// answers "is this document valid". It is the oracle the conformance table
-/// compares every other validator with, and it is also what a gitops pipeline
-/// that holds its values as YAML would call.
+/// answers "is this document valid", with the two rules of decision 0010 that
+/// Pkl itself is lenient about: `null` is not a value for an optional field
+/// (Pkl would take it, because an optional type is nullable), and an integral
+/// float is an integer (Pkl's `Int` refuses `20.0`).
+///
+/// It is the oracle the conformance suite compares every other validator with,
+/// and it is also what a gitops pipeline that holds its values as YAML would
+/// call.
 ///
 /// `Dynamic.toTyped` is shallow, so the nested conversion is done here by
 /// reflecting on the property types.
@@ -25,7 +30,9 @@ local function declared(v: Any, t: reflect.DeclaredType): Any =
     if (r is reflect.TypeAlias)
       conv(v, r.referent)
     else if (r.enclosingDeclaration.uri == "pkl:base")
-      if (r.name == "Listing" && v is Listing)
+      if (r.name == "Int" && v is Float && !v.isNaN && !v.isInfinite && v == v.truncate())
+        v.toInt()
+      else if (r.name == "Listing" && v is Listing)
         new Listing { for (e in v) { conv(e, t.typeArguments[0]) } }
       else if (r.name == "Mapping" && v is Dynamic)
         new Mapping { for (k, e in v.toMap()) { [k] = conv(e, t.typeArguments[1]) } }
@@ -38,8 +45,11 @@ local function typed(v: Any, c: reflect.Class): Any =
   if (v is Dynamic)
     let (props = c.allProperties.toMap().filter((_, p) -> !p.modifiers.contains("hidden")))
     let (extra = v.toMap().keys.filter((k) -> !props.containsKey(k)))
+    let (nulls = v.toMap().filter((_, e) -> e == null).keys)
       if (!extra.isEmpty)
         throw("Cannot find property `\(extra.first)` in class `\(c.name)`")
+      else if (!nulls.isEmpty)
+        throw("`\(nulls.first)` in class `\(c.name)` is null: null is not a value, omit the key")
       else
         v
           .toMap()

@@ -1,0 +1,12 @@
+/// The service that owns the URL tables. Everything that writes them asks it.
+@A.Schema { id = "https://example.com/url-shortener/schemas/urls.json"; title = "urls" }
+module conformance.contract.Urls
+
+extends "@templates/ServiceConfig.pkl"
+
+import "@fragments/Fragments.pkl" as F
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+listen: F.Listen
+tls: F.Tls?

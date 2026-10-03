@@ -1,0 +1,8 @@
+# Everything the suite generates or installs.
+.work/
+go/gen/
+ts/gen/
+ts/node_modules/
+kotlin/.gradle/
+kotlin/build/
+kotlin/src/main/kotlin/gen/

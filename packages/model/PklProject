@@ -1,0 +1,9 @@
+amends "pkl:Project"
+
+import "../Release.pkl"
+
+package =
+  Release.metadata(
+    "contracts.model",
+    "The intermediate form every generator reads: a contract's modules reflected into classes, properties, types and the vocabulary's constraints.",
+  )

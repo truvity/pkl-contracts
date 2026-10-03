@@ -1,0 +1,4 @@
+log:
+  level: info
+ownerRole: url_shortener_owner
+appRole: app

@@ -1,0 +1,33 @@
+/// Generates TypeScript types and zod schemas from the modules of a contract,
+/// into one file, `contract.zod.ts`: every shape as a schema and a type, and
+/// `schemas`, the documents by key (the tail of their `$id` after `/schemas/`).
+///
+///     pkl run --project-dir . package://.../contracts.typescript@<version>#/Generate.pkl \
+///       -- --dir ts Config.pkl
+///
+/// Needs `zod` 4 where the file is used.
+extends "pkl:Command"
+
+import "@model/Model.pkl"
+
+import "Zod.pkl"
+
+options: Options
+
+class Options {
+  /// The directory to write into, relative to the working directory.
+  @Flag { shortName = "d" }
+  dir: String = "ts"
+
+  /// The modules of the contract.
+  @Argument { convert = (path) -> new Import { uri = path } }
+  modules: Listing<Module>
+}
+
+output {
+  files {
+    ["\(options.dir)/contract.zod.ts"] {
+      text = Zod.render(Model.documents(options.modules.toList()))
+    }
+  }
+}

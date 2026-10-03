@@ -5,10 +5,13 @@ obvious from the files. Human-readable too.
 
 ## What this repository is
 
-Pkl source, in three packages released together: `contracts.vocab`,
-`contracts.fragments`, `contracts.templates`, under `packages/`. It contains no
-generator (the next piece of work) and no program: Pkl is a build tool and
-nothing here runs at run time.
+Pkl source, in nine packages released together: three that a contract is
+written with (`contracts.vocab`, `contracts.fragments`, `contracts.templates`)
+and six that read it (`contracts.model`, the reflection every generator shares,
+and the generators `contracts.jsonschema`, `contracts.helm`,
+`contracts.typescript`, `contracts.python` and `contracts.docs`), under
+`packages/`. It contains no program: Pkl is a build tool and nothing here runs
+at run time.
 
 ## Read first
 
@@ -20,7 +23,10 @@ nothing here runs at run time.
 ## The gate
 
 `just check` is the gate: tests, lint, the worked example, the packages built
-and their metadata checked, and the leak canary. It needs the network only for
+and their metadata checked (and the generators run as packages), the leak
+canary, the generated example against its committed copy, the compatibility
+diff against the last release tag, and the cross-language conformance suite
+(Kotlin is its own recipe, `conformance-kotlin`: Gradle is slow). It needs the network only for
 the first run (devbox, and the Pkl release `bin/pkl` caches).
 
 ## Traps
@@ -51,6 +57,22 @@ the first run (devbox, and the Pkl release `bin/pkl` caches).
 - **`pkl format` is part of the gate.** Run `just fmt` before committing.
 - **The templates do not evaluate bare.** `ServiceConfig` has a required field;
   evaluate it through the example or the tests.
+- **A hand-written change to `examples/service/generated/` is a bug**; it is
+  what the generators write for the example, and `just generate` rewrites it.
+  `just generated` fails when it is stale.
+- **Recognise annotations by name, never with `is`.** A class has one identity
+  per package URI, and a consumer and a generator may each depend on the
+  vocabulary through their own route. `packages/model/Model.pkl` matches by
+  class and module name; `hack/package-smoke.sh` runs the generators as packages
+  to keep it so.
+- **A package whose content changed needs a new version.** `just package` is
+  refused by Pkl for a version already published with other contents: the
+  vocabulary, fragments and templates of a released version are frozen until the
+  next release.
+- **A module you hand to a generator must be inside the project directory.**
+  `@dependency` is not a path, and a file outside the project cannot resolve its
+  own imports. Use `--project-dir`, and a `projectpackage://` URI for a module
+  inside a package.
 - **A hand-written change to `examples/service/values.yaml` is a bug**; it is
   the render of `values.pkl`, regenerate it:
   `bin/pkl eval --project-dir examples/service -f yaml examples/service/values.pkl > examples/service/values.yaml`.

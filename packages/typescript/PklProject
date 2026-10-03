@@ -1,0 +1,13 @@
+amends "pkl:Project"
+
+import "../Release.pkl"
+
+package =
+  Release.metadata(
+    "contracts.typescript",
+    "Generates TypeScript types and zod schemas from a contract: the vocabulary's constraints as zod validators, strict objects, and the semantic rules of decision 0010.",
+  )
+
+dependencies {
+  ["model"] = import("../model/PklProject")
+}

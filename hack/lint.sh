@@ -5,7 +5,8 @@
 #
 # Reads tracked and untracked-but-not-ignored files, so it runs before a commit.
 #
-#   1. No ad-hoc constraints outside the vocabulary. A constraint is written
+#   1. No ad-hoc constraints outside the vocabulary (the generator packages, which
+#      are not contracts, are not held to this). A constraint is written
 #      once, in packages/vocab/Vocab.pkl, reviewed once and used everywhere: no
 #      `Regex(`, no constrained type (`String(length >= 1)`), no alias, in any
 #      other module. The one exception is a cross-field rule, which is an alias
@@ -34,6 +35,10 @@ vocab=packages/vocab/Vocab.pkl
 for f in "${pkl[@]}"; do
   case "$f" in
     packages/vocab/*) continue ;;     # where constraints live
+    # The generators write Pkl that is not a contract: their string templates
+    # contain the text of other languages (regular expressions, a closing
+    # parenthesis after a name), which the checks below mistake for a constraint.
+    packages/model/* | packages/jsonschema/* | packages/helm/* | packages/typescript/* | packages/python/* | packages/docs/*) continue ;;
     packages/Release.pkl) continue ;; # package metadata, not a contract
     packages/*/PklProject | */PklProject) continue ;;
     test/*) continue ;;               # the tests may construct what they refuse

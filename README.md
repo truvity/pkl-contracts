@@ -10,7 +10,18 @@ written once.
 | `contracts.fragments` | the shapes shared between services: listener, probes, log, drain, TLS, PostgreSQL, NATS, object store, and the `platform` block of a chart | the same, `contracts.fragments` |
 | `contracts.templates` | what a service's own contract starts from: `ServiceConfig` and `ChartValues` | the same, `contracts.templates` |
 
-All three are released together under one version.
+| `contracts.model` | the intermediate form every generator reads: a contract's modules reflected into classes, properties, types and constraints | the same, `contracts.model` |
+| `contracts.jsonschema` | **generator:** JSON Schema draft 2020-12, one document per shape, composed by `$ref`; and the compatibility diff between two sets of schemas (`Generate.pkl`, `Compat.pkl`) | the same, `contracts.jsonschema` |
+| `contracts.helm` | **generator:** a chart's `values.schema.json` (platform and config composed), `values.yaml` defaults and a README values table | the same, `contracts.helm` |
+| `contracts.typescript` | **generator:** TypeScript types and zod schemas | the same, `contracts.typescript` |
+| `contracts.python` | **generator:** pydantic v2 models | the same, `contracts.python` |
+| `contracts.docs` | **generator:** a Markdown reference: fields, types, defaults, constraints, secrets | the same, `contracts.docs` |
+
+All of them are released together under one version. Each generator is a
+`pkl:Command` (`Generate.pkl`): run it with `pkl run` on the modules of a
+contract ([docs/authoring.md](docs/authoring.md#generating)). Go and Kotlin
+come from the official generators, `pkl-gen-go` and `pkl-codegen-kotlin`,
+pinned behind one script, `hack/codegen.sh`.
 
 ## Who it is for
 
@@ -21,8 +32,9 @@ written once, in Pkl, and that everything restating it (JSON Schema, a type in
 each language, reference documentation) is generated from that one source:
 decision 0010 of [truvity/policy](https://github.com/truvity/policy).
 
-It deliberately does not generate anything yet, and installs nothing: Pkl is a
-build-time tool and is never present at run time. It does not provide Pkl
+It generates, and installs nothing: Pkl is a build-time tool and is never
+present at run time. The generated types are shapes; the generated JSON Schema
+is what a service validates against. It does not provide Pkl
 itself either; pin the Pkl version you build with, because Pkl is pre-1.0 and
 breaks between minors (this repository builds with 0.32.1).
 
@@ -51,7 +63,7 @@ with their reasons.
 
 ## Install and a worked example
 
-Pin the three packages, at the exact version, in your `PklProject`, and run
+Pin the packages the contract is written with (the three below), and the generators you run (`contracts.jsonschema` and the others, as `pkl run package://...#/Generate.pkl` or as dependencies), at the exact version, in your `PklProject`, and run
 `pkl project resolve` to record their checksums:
 
 ```pkl
@@ -131,8 +143,9 @@ and compares the result with the committed `values.yaml`.
 
 ## Consumers
 
-None yet. The surface is a Pkl project depending on the three packages; the
-first consumers will be the generators that build JSON Schemas, chart values
+None yet outside this repository. The surface is a Pkl project depending on the
+three packages and running the generators; the first consumers will be the
+repositories that build JSON Schemas, chart values
 schemas and language types from a contract, and the repositories that author
 one.
 
@@ -168,23 +181,35 @@ commit and in CI, and reading the rest is a review rule
 
 ## Status
 
-Three packages exist and build, and are tested on Pkl 0.32.1: the vocabulary
+Nine packages exist and build, and are tested on Pkl 0.32.1: the vocabulary
 with its probes, nine fragments (listener, probes, log, drain, TLS, PostgreSQL,
-NATS, NATS consumer, object store) and the platform block, and the two
-templates. The packages are not released yet, so the URIs above resolve only
-once the first release, v0.1.0, is published.
+NATS, NATS consumer, object store) and the platform block, the two templates,
+and the generators: JSON Schema, Helm values, TypeScript with zod, Python with
+pydantic, and a Markdown reference, plus a compatibility diff of two sets of
+schemas. The first three are released as v0.1.0; the generators ship with the
+next release, so until then they are run from this checkout.
 
-What is not here: the generators (the next piece of work); the fragments
-`LambdaArgs`, `SystemdUnit` and `Secrets` and the templates `LambdaValues` and
-`UnitValues`, which wait for a source shape; and a release workflow
-([docs/packaging.md](docs/packaging.md) says what it needs). Pkl is fetched by
-`bin/pkl` rather than devbox until nixpkgs ships 0.32 or newer.
+Generated, and agreed on: the conformance suite (`just conformance`) asks nine
+validators about every fixture and probe (four JSON Schema engines, zod,
+pydantic, Go and Kotlin decoded through the official generators' types plus the
+schema, and Pkl itself), and they must all agree. One known gap is reported
+there and not failed: the engines differ on characters other than `\n` that
+a pattern's `.`, `\s` and `$` treat as line breaks or white space
+([docs/authoring.md](docs/authoring.md#what-the-engines-still-disagree-on)).
+
+What is not here: the fragments `LambdaArgs`, `SystemdUnit` and `Secrets` and
+the templates `LambdaValues` and `UnitValues`, which wait for a source shape; a
+Go or Kotlin generator of our own (the official ones are used, and their types
+are shapes only); and a release workflow of our own beyond what
+[docs/packaging.md](docs/packaging.md) describes. Pkl is fetched by `bin/pkl`
+rather than devbox until nixpkgs ships 0.32 or newer.
 
 ## Development
 
 ```bash
 devbox shell     # dev environment
-just check       # tests, lint, example, packages, leak canary: must pass before a PR
+just check       # tests, lint, example, packages, leak canary, generated, compat, conformance: must pass before a PR
+just generate    # regenerate examples/service/generated after a change to a generator or a contract
 just fmt         # format the Pkl files
 just resolve     # after a version or dependency change
 ```

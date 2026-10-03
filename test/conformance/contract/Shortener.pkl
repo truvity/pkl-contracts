@@ -1,0 +1,12 @@
+@A.Schema { id = "https://example.com/schemas/shortener.json" }
+module conformance.contract.Shortener
+
+extends "@templates/ServiceConfig.pkl"
+
+import "@fragments/Fragments.pkl" as F
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+listen: F.Listen
+baseURL: V.Url
+database: F.Postgres

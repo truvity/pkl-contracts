@@ -1,0 +1,4 @@
+/// The platform block, reachable by a file path: the Go side of the suite
+/// names its modules by file, and a module inside a package is only reachable
+/// through the project's dependencies.
+amends "@fragments/Platform.pkl"

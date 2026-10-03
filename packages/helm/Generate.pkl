@@ -1,0 +1,45 @@
+/// Generates a chart's Helm artifacts from its values contract, into one
+/// directory (the chart's): `values.schema.json`, `README.md` (the values
+/// table) and, when the module given amends the chart, `values.yaml`.
+///
+///     pkl run --project-dir . package://.../contracts.helm@<version>#/Generate.pkl \
+///       -- --dir charts/echo values.pkl
+///
+/// The module is the chart's contract (a module annotated `@Chart`), or a module
+/// that amends it with the chart's default values: the contract gives the schema
+/// and the table, the values give `values.yaml`, so a default that breaks a rule
+/// fails when the module is evaluated.
+extends "pkl:Command"
+
+import "@model/Model.pkl"
+
+import "Helm.pkl"
+
+options: Options
+
+class Options {
+  /// The directory to write into: the chart's.
+  @Flag { shortName = "d" }
+  dir: String = "."
+
+  /// The chart's contract, or its values.
+  @Argument { convert = (path) -> new Import { uri = path } }
+  chart: Module
+}
+
+local contract =
+  Model.chartOf(options.chart)
+    ?? throw("\(options.chart) is not a chart: no module in its chain is annotated @Chart")
+
+output {
+  files {
+    ["\(options.dir)/values.schema.json"] {
+      value = Helm.valuesSchema(contract)
+      renderer = new JsonRenderer { indent = "  " }
+    }
+    ["\(options.dir)/README.md"] { text = Helm.readme(contract) }
+    when (!Model.isChartModule(options.chart)) {
+      ["\(options.dir)/values.yaml"] { text = Helm.valuesYaml(options.chart) }
+    }
+  }
+}

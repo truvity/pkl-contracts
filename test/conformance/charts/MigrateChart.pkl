@@ -1,0 +1,23 @@
+/// The values of the `migrate` chart: the platform block, the service's own
+/// configuration (exactly `Migrate`) and the one image it ships.
+@A.Chart { title = "migrate chart values" }
+module conformance.charts.MigrateChart
+
+extends "@templates/ChartValues.pkl"
+
+import "@fragments/Platform.pkl"
+import "@vocab/Annotations.pkl" as A
+
+import "../contract/Migrate.pkl"
+
+/// The service's own configuration.
+config: Migrate
+
+/// The one image this chart ships.
+images: Images
+
+/// The images of this chart, by component.
+class Images {
+  /// The service's image.
+  migrate: Platform.PlatformImage
+}

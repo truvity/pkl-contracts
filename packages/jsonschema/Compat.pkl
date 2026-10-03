@@ -1,0 +1,50 @@
+/// Compares two directories of JSON Schemas, as `Generate.pkl` writes them, and
+/// reports what a document written against the `before` schemas can no longer
+/// say, or must now say. Each line is `BREAKING` or `compatible`, with the
+/// document, the path inside it and what changed; the rules are in
+/// `Compatibility.pkl`.
+///
+///     pkl run package://.../contracts.jsonschema@<version>#/Compat.pkl \
+///       -- --before schemas-v1 --after schemas
+///
+/// The command always succeeds and says on its last line how many changes are
+/// breaking (`breaking: N`); what a build does about that is its own rule.
+extends "pkl:Command"
+
+import "Compatibility.pkl"
+
+options: Options
+
+class Options {
+  /// The schemas of the release to stay compatible with.
+  @Flag { shortName = "b" }
+  before: String
+
+  /// The schemas of the change under review.
+  @Flag { shortName = "a" }
+  after: String
+}
+
+local cwd = read("env:PWD")
+
+local function absolute(dir: String): String = if (dir.startsWith("/")) dir else "\(cwd)/\(dir)"
+
+local function schemas(dir: String): Map<String, Compatibility.Data> =
+  let (root = absolute(dir))
+    read*("file://\(root)/**.json")
+      .toMap()
+      .mapKeys((uri, _) -> uri.replaceFirst("file:\(root)/", ""))
+      .mapValues((_, r) -> Compatibility.parse(r.text))
+
+local changes: List<Compatibility.Change> =
+  Compatibility.diff(schemas(options.before), schemas(options.after))
+
+output {
+  text =
+    changes
+      .map((c) ->
+        "\(if (c.breaking) "BREAKING   " else "compatible ") \(c.document)\(if (c.path == "") "" else " \(c.path)"): \(c.message)\n"
+      )
+      .join("")
+      + "breaking: \(changes.filter((c) -> c.breaking).length)\n"
+}

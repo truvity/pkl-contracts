@@ -1,6 +1,21 @@
 {
   "schemaVersion": 1,
   "resolvedDependencies": {
+    "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.python@0": {
+      "type": "local",
+      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.python@0.1.0",
+      "path": "../packages/python"
+    },
+    "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.model@0": {
+      "type": "local",
+      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.model@0.1.0",
+      "path": "../packages/model"
+    },
+    "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.docs@0": {
+      "type": "local",
+      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.docs@0.1.0",
+      "path": "../packages/docs"
+    },
     "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.templates@0": {
       "type": "local",
       "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.templates@0.1.0",
@@ -15,6 +30,21 @@
       "type": "local",
       "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.fragments@0.1.0",
       "path": "../packages/fragments"
+    },
+    "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.typescript@0": {
+      "type": "local",
+      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.typescript@0.1.0",
+      "path": "../packages/typescript"
+    },
+    "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.jsonschema@0": {
+      "type": "local",
+      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.jsonschema@0.1.0",
+      "path": "../packages/jsonschema"
+    },
+    "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.helm@0": {
+      "type": "local",
+      "uri": "projectpackage://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.helm@0.1.0",
+      "path": "../packages/helm"
     }
   }
 }

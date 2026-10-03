@@ -1,0 +1,18 @@
+/// The `migrate` chart's default values, checked against its contract when the
+/// module is evaluated.
+amends "MigrateChart.pkl"
+
+config {
+  log { level = "info" }
+  ownerRole = "shortener_owner"
+  appRole = "shortener_app"
+}
+
+images {
+  migrate {
+    registry = "registry.example.com"
+    repository = "example/shortener/migrate"
+    tag = ""
+    digest = ""
+  }
+}

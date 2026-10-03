@@ -1,0 +1,23 @@
+/// The values of the `web` chart: the platform block, the service's own
+/// configuration (exactly `Web`) and the one image it ships.
+@A.Chart { title = "web chart values" }
+module conformance.charts.WebChart
+
+extends "@templates/ChartValues.pkl"
+
+import "@fragments/Platform.pkl"
+import "@vocab/Annotations.pkl" as A
+
+import "../contract/Web.pkl"
+
+/// The service's own configuration.
+config: Web
+
+/// The one image this chart ships.
+images: Images
+
+/// The images of this chart, by component.
+class Images {
+  /// The service's image.
+  web: Platform.PlatformImage
+}

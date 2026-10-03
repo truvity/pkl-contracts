@@ -3,7 +3,7 @@
 ## One version
 
 The whole repository has one version, `vX.Y.Z`, and the packages are released
-together: a tag releases all three. The version is written once, in
+together: a tag releases all of them (nine). The version is written once, in
 `packages/Release.pkl`; each package's `PklProject` takes its metadata from
 `Release.metadata`, and `hack/lint.sh` refuses a version typed anywhere else.
 
@@ -29,7 +29,7 @@ So `baseUri` is `package://github.com/truvity/pkl-contracts/releases/download/v<
 and `packageZipUrl` is `https://github.com/truvity/pkl-contracts/releases/download/v<version>/<name>@<version>.zip`.
 The metadata asset is named `<last path element>@<version>`, nothing more.
 
-A release therefore carries twelve assets, four per package:
+A release therefore carries thirty-six assets, four per package:
 
 | asset | what |
 |---|---|
@@ -38,7 +38,7 @@ A release therefore carries twelve assets, four per package:
 | `contracts.vocab@0.1.0.zip` | the package |
 | `contracts.vocab@0.1.0.zip.sha256` | its checksum |
 
-(and the same for `contracts.fragments` and `contracts.templates`). This is the
+(and the same for every other package). This is the
 shape Pkl's own `pkl-go` publishes its `pkl.golang` package in, behind a
 redirect.
 
@@ -57,7 +57,7 @@ dependencies {
 
 `just package` builds the packages with `pkl project package` exactly as a
 release will publish them (into `.out/`), and `hack/package-check.sh` checks
-what it produced: the three assets of each package are named `<name>@<version>`
+what it produced: the four assets of each package are named `<name>@<version>`
 as Pkl will ask for them, the metadata's `packageUri` and `packageZipUrl` point
 into the release `v<version>`, the version is the repository's, every
 dependency is a sibling package at the same version, and the zip's checksum is
@@ -71,6 +71,15 @@ redirect, as GitHub does, and pointing a consumer at it with
 the metadata and the zip at exactly the GitHub paths above, resolves the
 dependency graph and evaluates a module that imports all three.
 
+`hack/package-smoke.sh` then does what a consumer does with the generators:
+it serves `.out/` that way, resolves a throwaway project that depends on the
+vocabulary, fragments and templates as packages, runs every generator as a
+package (`pkl run package://...#/Generate.pkl`) on the example's contract, and
+compares the output with the committed copy. It exists because the tests
+cannot see a class that has one identity per package URI: a generator that
+recognised the vocabulary's annotations with `is` wrote nothing for such a
+consumer.
+
 ## What a release needs, and what is not yet built
 
 There is no `release.yaml` or `auto-release.yaml` yet. The shared
@@ -81,7 +90,7 @@ needs its own steps, on a tag `v*`:
 1. refuse a tag that is not `v` and the version in `packages/Release.pkl`, and
    one that has no `## vX.Y.Z` heading in the CHANGELOG (component contract C5);
 2. `just package`, which also runs the metadata check;
-3. create the GitHub release for the tag and upload the twelve assets in
+3. create the GitHub release for the tag and upload the thirty-six assets in
    `.out/` under their exact names (a name is part of the URI, so none may be
    renamed or zipped again);
 4. smoke-test the published URIs: resolve a throwaway project that depends on

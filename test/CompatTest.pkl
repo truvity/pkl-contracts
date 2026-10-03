@@ -1,0 +1,143 @@
+/// The compatibility diff, on synthetic before and after schemas: each breaking
+/// change it must flag, and each additive one it must let through.
+amends "pkl:test"
+
+import "@jsonschema/Compatibility.pkl"
+
+/// The changes between two one-document sets.
+local function changes(before: String, after: String): List<Compatibility.Change> =
+  Compatibility.diff(
+    Map("d.json", Compatibility.parse(before)),
+    Map("d.json", Compatibility.parse(after)),
+  )
+
+local function breaking(before: String, after: String): List<String> =
+  changes(before, after)
+    .filter((c) -> c.breaking)
+    .map((c) -> c.message)
+
+local function compatible(before: String, after: String): Boolean =
+  changes(before, after).every((c) -> !c.breaking)
+
+local function props(p: String): String =
+  #"{"type":"object","additionalProperties":false,"properties":\#(p)}"#
+
+facts {
+  ["identical schemas have no changes"] {
+    changes(props(#"{"a":{"type":"string"}}"#), props(#"{"a":{"type":"string"}}"#)).isEmpty
+  }
+  ["a removed property is breaking, an added one is not"] {
+    breaking(
+      props(#"{"a":{"type":"string"},"b":{"type":"string"}}"#),
+      props(#"{"a":{"type":"string"}}"#),
+    )
+      == List("the property was removed")
+    compatible(
+      props(#"{"a":{"type":"string"}}"#),
+      props(#"{"a":{"type":"string"},"b":{"type":"string"}}"#),
+    )
+  }
+  ["a newly required property is breaking, one no longer required is not"] {
+    breaking(
+      #"{"type":"object","properties":{"a":{"type":"string"}}}"#,
+      #"{"type":"object","required":["a"],"properties":{"a":{"type":"string"}}}"#,
+    ) == List("`a` is newly required")
+    compatible(
+      #"{"type":"object","required":["a"],"properties":{"a":{"type":"string"}}}"#,
+      #"{"type":"object","properties":{"a":{"type":"string"}}}"#,
+    )
+  }
+  ["a narrowed type is breaking, a widened one is not"] {
+    breaking(#"{"type":"number"}"#, #"{"type":"integer"}"#).length == 1
+    breaking(#"{"type":"string"}"#, #"{"type":"integer"}"#).length == 1
+    breaking(#"{"type":["integer","string"]}"#, #"{"type":"integer"}"#).length == 1
+    compatible(#"{"type":"integer"}"#, #"{"type":"number"}"#)
+    compatible(#"{"type":"integer"}"#, #"{"type":["integer","string"]}"#)
+  }
+  ["a removed enum member, or an enum added, is breaking; a member added is not"] {
+    breaking(#"{"enum":["a","b"]}"#, #"{"enum":["a"]}"#) == List("enum member removed: b")
+    breaking(#"{"type":"string"}"#, #"{"type":"string","enum":["a"]}"#) == List("an enum was added")
+    compatible(#"{"enum":["a"]}"#, #"{"enum":["a","b"]}"#)
+    compatible(#"{"type":"string","enum":["a"]}"#, #"{"type":"string"}"#)
+  }
+  ["a tightened range or length is breaking, a relaxed one is not"] {
+    breaking(#"{"type":"integer","minimum":1}"#, #"{"type":"integer","minimum":2}"#).length == 1
+    breaking(#"{"type":"integer","maximum":10}"#, #"{"type":"integer","maximum":9}"#).length == 1
+    breaking(#"{"type":"integer"}"#, #"{"type":"integer","maximum":9}"#).length == 1
+    breaking(#"{"type":"string","minLength":1}"#, #"{"type":"string","minLength":3}"#).length == 1
+    breaking(#"{"type":"array","maxItems":3}"#, #"{"type":"array","maxItems":2}"#).length == 1
+    compatible(#"{"type":"integer","minimum":1}"#, #"{"type":"integer","minimum":0}"#)
+    compatible(#"{"type":"integer","maximum":10}"#, #"{"type":"integer"}"#)
+  }
+  ["a pattern added or changed is breaking, one removed is not"] {
+    breaking(#"{"type":"string"}"#, #"{"type":"string","pattern":"^a"}"#).length == 1
+    breaking(#"{"type":"string","pattern":"^a"}"#, #"{"type":"string","pattern":"^a$"}"#).length
+      == 1
+    compatible(#"{"type":"string","pattern":"^a"}"#, #"{"type":"string"}"#)
+    changes(#"{"type":"string","pattern":"^a"}"#, #"{"type":"string","pattern":"^a"}"#).isEmpty
+  }
+  ["closing an open object is breaking, opening a closed one is not"] {
+    breaking(#"{"type":"object"}"#, #"{"type":"object","additionalProperties":false}"#).length == 1
+    breaking(#"{"type":"object"}"#, #"{"type":"object","unevaluatedProperties":false}"#).length == 1
+    compatible(#"{"type":"object","additionalProperties":false}"#, #"{"type":"object"}"#)
+  }
+  ["a change below a property, an item and a local reference is found there"] {
+    local doc = (min: Int) ->
+      ##"{"$defs":{"x":{"type":"integer","minimum":\##(min)}},"type":"object","properties":{"a":{"type":"array","items":{"$ref":"#/$defs/x"}}}}"##
+    changes(doc.apply(1), doc.apply(5))
+      .filter((c) -> c.breaking)
+      .map((c) -> c.path) == List("a.[]")
+  }
+  ["a reference to another document is compared in that document, not here"] {
+    local doc = (ref: String) ->
+      Map(
+        "a.json",
+        Compatibility.parse(
+          #"{"$id":"https://example.com/a.json","type":"object","properties":{"x":{"$ref":"\#(ref)"}}}"#,
+        ),
+        "b.json", Compatibility.parse(#"{"$id":"https://example.com/b.json","type":"integer"}"#),
+      )
+    Compatibility
+      .diff(doc.apply("https://example.com/b.json"), doc.apply("https://example.com/b.json"))
+      .isEmpty
+  }
+  ["a reference swapped for an inline schema is compared by what it names"] {
+    local before =
+      Map(
+        "a.json",
+        Compatibility.parse(
+          #"{"$id":"https://example.com/a.json","type":"object","properties":{"x":{"$ref":"https://example.com/b.json"}}}"#,
+        ),
+        "b.json",
+        Compatibility.parse(#"{"$id":"https://example.com/b.json","type":"integer","minimum":1}"#),
+      )
+    local after =
+      Map(
+        "a.json",
+        Compatibility.parse(
+          #"{"$id":"https://example.com/a.json","type":"object","properties":{"x":{"type":"integer","minimum":9}}}"#,
+        ),
+        "b.json",
+        Compatibility.parse(#"{"$id":"https://example.com/b.json","type":"integer","minimum":1}"#),
+      )
+    Compatibility.diff(before, after).filter((c) -> c.breaking).length == 1
+  }
+  ["an anyOf alternative no longer covered is breaking"] {
+    breaking(
+      #"{"anyOf":[{"type":"string"},{"type":"integer"}]}"#,
+      #"{"anyOf":[{"type":"string"}]}"#,
+    ).length == 1
+    compatible(
+      #"{"anyOf":[{"type":"string"}]}"#,
+      #"{"anyOf":[{"type":"string"},{"type":"integer"}]}"#,
+    )
+  }
+  ["a document removed is breaking, one added is not, a changed default and description are not"] {
+    Compatibility.diff(Map("a.json", Compatibility.parse("{}")), Map()).any((c) -> c.breaking)
+    Compatibility.diff(Map(), Map("a.json", Compatibility.parse("{}"))).every((c) -> !c.breaking)
+    compatible(
+      #"{"type":"integer","default":1,"description":"a"}"#,
+      #"{"type":"integer","default":2,"description":"b"}"#,
+    )
+  }
+}
