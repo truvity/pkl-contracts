@@ -7,6 +7,15 @@ under one version, so a heading covers all of them.
 
 ## Unreleased
 
+### Fixes
+
+- **`OtelProtocol`'s documentation states the right reason for leaving out
+  `http/json`.** It said the Go SDK's HTTP exporter always sends protobuf; it
+  does not (`otlptracehttp` and `otlpmetrichttp` can send JSON). The reason is
+  the Go exporter selection most services use (`autoexport`), which refuses
+  `http/json`, and the Python and TypeScript exporters, which are fixed to
+  HTTP/protobuf. The type is unchanged.
+
 ## v0.4.0 — 2026-10-04
 
 ### Features
