@@ -5,7 +5,7 @@ per tag. The prose bullets are written for a consumer; the commit subjects under
 them are the GitHub Release's own list. All packages are released together
 under one version, so a heading covers all of them.
 
-## Unreleased
+## v0.6.0 — 2026-10-08
 
 Everything here is additive: a contract that uses none of it generates exactly
 the output it did, apart from the one case listed last. Together they let a
