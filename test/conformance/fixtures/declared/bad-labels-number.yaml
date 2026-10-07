@@ -1,0 +1,7 @@
+authorities:
+  - ca-one
+selector:
+  app: web
+region: eu
+labels:
+  a: 1

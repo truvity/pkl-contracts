@@ -18,7 +18,7 @@ local function table(headers: List<String>, rows: List<List<String>>): String =
 local function propRow(p: Model.Prop): List<String> =
   List(
     "`\(p.name)`",
-    cell(Model.typeLabel(p.type)),
+    cell(Model.typeLabel(p.type) + (if (p.nullable) " | null" else "")),
     if (p.required) "yes" else "no",
     if (p.hasDefault) code(Model.literal(p.default)) else "",
     cell(Model.constraintsOf(p.type).join("; ")),

@@ -50,7 +50,7 @@ HELM = WORK / "helm"
 TIMES: dict[str, float] = {}
 
 SCHEMA_ONLY = ("ajv", "santhosh", "pyjsonschema", "networknt")
-CHARTS = {"web": "WebValues", "stat": "StatValues", "migrate": "MigrateValues", "cond": "CondValues"}
+CHARTS = {"web": "WebValues", "stat": "StatValues", "migrate": "MigrateValues", "cond": "CondValues", "defs": "DefsValues"}
 
 
 def put(values, path, value):
@@ -69,6 +69,16 @@ def put(values, path, value):
 # Edits of a chart's defaults beyond the two every chart gets, for the rules across
 # fields on its own module: (label, name, edit). The defaults give `database.host`.
 CHART_EDITS = {
+    # The chart's own `@Def` definitions are at the root of its values schema, so a
+    # `$ref` to one resolves and applies: a map of strings and a class.
+    "defs": [
+        ("ok", "label-set", lambda v: put(v, ["labels", "team"], "blue")),
+        ("bad", "label-number", lambda v: put(v, ["labels", "team"], 1)),
+        ("bad", "annotation-number", lambda v: put(v, ["annotations", "note"], 1)),
+        ("bad", "owner-without-name", lambda v: put(v, ["owner", "name"], None)),
+        ("bad", "owner-unknown-key", lambda v: put(v, ["owner", "pager"], "x")),
+        ("ok", "owner-contact", lambda v: put(v, ["owner", "contact"], "ops")),
+    ],
     "cond": [
         ("bad", "host-missing", lambda v: put(v, ["database", "host"], None)),
         ("bad", "active-without-upstream", lambda v: put(v, ["phase"], "active")),

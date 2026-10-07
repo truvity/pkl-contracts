@@ -312,3 +312,103 @@ class SoundOther {
   /// Y.
   y: V.NonEmptyString?
 }
+
+/// Required, but not nullable.
+class RequiredNotNullable {
+  /// Needs a nullable type.
+  @A.Required
+  items: Listing<V.NonEmptyString>
+}
+
+/// Required, and defaulted.
+class OnlyRequiredWithDefault {
+  /// Contradiction.
+  @A.Required
+  region: V.NonEmptyString? = "x"
+}
+
+/// Required in two ways.
+class RequiredTwice {
+  /// Contradiction.
+  @A.Required
+  @A.SetAtInstall
+  region: V.NonEmptyString?
+}
+
+/// What `@Required` looks like.
+class RequiredPlain {
+  /// A list the caller gives.
+  @A.Required
+  items: Listing<V.NonEmptyString>?
+  /// An empty string is a value here: only `@SetAtInstall` asks for a non-empty one.
+  @A.Required
+  region: String?
+}
+
+/// Nullable, but the type is not.
+class NullableNotNullable {
+  /// Needs a nullable type.
+  @A.Nullable
+  size: Int
+}
+
+/// Nullable and required.
+class NullableRequired {
+  /// Contradiction.
+  @A.Nullable
+  @A.Required
+  size: Int?
+}
+
+/// A line-break guard on a string with no pattern.
+class MultiLineNoPattern {
+  /// There is no guard to lift.
+  @A.MultiLine
+  text: V.NonEmptyString?
+}
+
+/// A line-break guard on a number.
+class MultiLineOnNumber {
+  /// Wrong kind.
+  @A.MultiLine
+  count: Int?
+}
+
+/// A set of numbers on a string.
+class ValuesOnString {
+  /// Wrong kind.
+  @A.OneOfValues { values = List(1, 2) }
+  name: String?
+}
+
+/// A fractional member of a set of integers.
+class ValuesNotWhole {
+  /// Not an integer.
+  @A.OneOfValues { values = List(1, 2.5) }
+  size: Int?
+}
+
+/// A set on an alias, and one on a property over it.
+@A.OneOfValues { values = List(1, 2) }
+typealias FewNumbers = Int(this == 1 || this == 2)
+
+/// The property's set and the alias's leave no value.
+class ValuesLeaveNothing {
+  /// Disjoint.
+  @A.OneOfValues { values = List(3, 4) }
+  size: FewNumbers?
+}
+
+/// The intersection of the two.
+class ValuesNarrowed {
+  /// One of the two.
+  @A.OneOfValues { values = List(2, 3) }
+  size: FewNumbers?
+}
+
+/// What `@Nullable` looks like.
+class NullableOk {
+  /// Optional, and `null` is a value.
+  @A.Nullable
+  size: Int?
+}

@@ -153,6 +153,52 @@ facts {
     Model.declNode(LintFixtures, "Defaults").cls.props.first.required
     Model.declNode(LintFixtures, "Defaults").cls.props.first.setAtInstall
   }
+  ["required without a default: nullable, never defaulted, never beside set-at-install; and then required"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "RequiredNotNullable").cls.props.length)
+      .contains("@Required needs a nullable type")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "OnlyRequiredWithDefault").cls.props.length)
+      .contains("contradict")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "RequiredTwice").cls.props.length)
+      .contains("say the same thing")
+    local plain = Model.declNode(LintFixtures, "RequiredPlain").cls.props
+    plain.every((p) -> p.required && !p.setAtInstall && p.requiredOnly && !p.hasDefault)
+    // Unlike `@SetAtInstall`, it does not ask for a string that refuses `""`.
+    plain.last.type.length == null
+  }
+  ["null is declared on a nullable property that is not required"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "NullableNotNullable").cls.props.length)
+      .contains("@Nullable needs a nullable type")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "NullableRequired").cls.props.length)
+      .contains("contradict")
+    Model.declNode(LintFixtures, "NullableOk").cls.props.first.nullable
+    !Model.declNode(LintFixtures, "NullableOk").cls.props.first.required
+    !Model.declNode(LintFixtures, "RequiredPlain").cls.props.first.nullable
+  }
+  ["the line-break guard is lifted only from a string that has a pattern"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "MultiLineNoPattern").cls.props.length)
+      .contains("@MultiLine lifts the line-break guard")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "MultiLineOnNumber").cls.props.length)
+      .contains("@MultiLine lifts the line-break guard")
+  }
+  ["a set of numbers is for a number, whole for an integer, and a property can only narrow its type's"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ValuesOnString").cls.props.length)
+      .contains("@OneOfValues is for a number")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ValuesNotWhole").cls.props.length)
+      .contains("not whole")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ValuesLeaveNothing").cls.props.length)
+      .contains("leave no value")
+    Model.declNode(LintFixtures, "ValuesNarrowed").cls.props.first.type.numericValues == List(2)
+  }
   ["a property's own bound needs a number for @Range, a string for @Length, and leaves a value"] {
     module
       .catch(() -> Model.declNode(LintFixtures, "RangeOnString").cls.props.length)

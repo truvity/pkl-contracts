@@ -71,6 +71,7 @@ fun main(args: Array<String>) {
                     "blocks" -> cfg.to<Blocks>()
                     "collections" -> cfg.to<Collections>()
                     "conditions" -> cfg.to<Conditions>()
+                    "declared" -> cfg.to<Declared>()
                     "inherit" -> cfg.to<Inherit>()
                     "names" -> cfg.to<Names>()
                     "literals" -> cfg.to<Literals>()

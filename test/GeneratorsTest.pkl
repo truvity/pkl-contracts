@@ -12,16 +12,19 @@ import "@python/Pydantic.pkl"
 import "@typescript/Zod.pkl"
 
 import "conformance/charts/CondChart.pkl"
+import "conformance/charts/DefsChart.pkl"
 import "conformance/contract/Blocks.pkl"
 import "conformance/contract/Collections.pkl"
 import "conformance/contract/Conditions.pkl"
+import "conformance/contract/Declared.pkl"
 import "conformance/contract/Literals.pkl"
 import "conformance/contract/Names.pkl"
 import "conformance/union/Union.pkl"
+import "PlainChart.pkl"
 import "Showcase.pkl"
 
 local docs =
-  Model.documents(List(Blocks, Collections, Conditions, Literals, Names, Showcase, Union))
+  Model.documents(List(Blocks, Collections, Conditions, Declared, Literals, Names, Showcase, Union))
 local zod = Zod.render(docs)
 local py = Pydantic.render(docs)
 local reference = Docs.render(docs)
@@ -237,5 +240,90 @@ facts {
     !schema("union").properties["either"].toMap().containsKey("oneOf")
     zod.contains("z.union([NonEmptyString, z.lazy(() => UnionNamespace)])")
     py.contains("NonEmptyString | UnionNamespace")
+  }
+  ["the line-break guard stays by default and is lifted where a contract declares a value multi-line"] {
+    local props = schema("declared").properties
+    props["single"].pattern == "-----BEGIN CERTIFICATE-----"
+    props["single"].not == (new Dynamic { pattern = Model.lineBreakClass })
+    // On the alias, and on the property over an alias that has none of its own.
+    props["bundle"].pattern == "-----BEGIN CERTIFICATE-----"
+    !props["bundle"].toMap().containsKey("not")
+    props["openBundle"].pattern == "-----BEGIN CERTIFICATE-----"
+    !props["openBundle"].toMap().containsKey("not")
+    zod.contains("export const PemBundle = z.string().regex(/-----BEGIN CERTIFICATE-----/);")
+    zod.contains(
+      "export const Marker = z.string().regex(/-----BEGIN CERTIFICATE-----/).refine(noLineBreak);",
+    )
+    zod.contains("openBundle: z.string().regex(/-----BEGIN CERTIFICATE-----/).optional()")
+    py.contains(
+      #"PemBundle = Annotated[str, StringConstraints(pattern=r"-----BEGIN CERTIFICATE-----")]"#,
+    )
+    py.contains(
+      #"Marker = Annotated[str, StringConstraints(pattern=r"-----BEGIN CERTIFICATE-----"), AfterValidator(_no_line_break)]"#,
+    )
+    reference.contains("may span lines")
+    reference.contains("never a line break")
+  }
+  ["a nullable property admits null: a type list where the type is a keyword, an anyOf where it is a $ref"] {
+    local props = schema("declared").properties
+    props["instances"].type == List("integer", "null")
+    props["instances"].minimum == 1
+    props["name"].type == List("string", "null")
+    props["labels"].type == List("object", "null")
+    props["entries"].type == List("array", "null")
+    props["secret"].type == List("object", "null")
+    props["level"].`enum` == List("debug", "info", "warn", "error", null)
+    props["tag"].anyOf
+      == List(new Dynamic { ["$ref"] = "#/$defs/tag" }, new Dynamic { type = "null" })
+    // Optional stays: null is a value, absence is another.
+    !schema("declared").required.contains("instances")
+    // A property that did not declare it still refuses null.
+    props["plain"].type == "integer"
+    zod.contains("instances: z.number().int().min(1).nullable().optional()")
+    zod.contains("tag: Tag.nullable().optional()")
+    py.contains("instances: Annotated[int, BeforeValidator(_integral), Field(ge=1)] | None = None")
+    py.contains("plain: PositiveInt | None = None")
+    py.contains(#"_nullable: ClassVar[frozenset[str]] = frozenset({"instances", "name", "level""#)
+    reference.contains(#"| `instances` | PositiveInt \| null | no |"#)
+  }
+  ["a set of numbers is an enum, which null joins on a nullable property"] {
+    local props = schema("declared").properties
+    props["size"].type == List("integer", "null")
+    props["size"].`enum` == List(256, 384, 521, 2048, 3072, 4096, null)
+    props["replicas"].`enum` == List(1, 2, 4)
+    props["replicas"]["default"] == 2
+    props["weight"].`enum` == List(0.25, 0.5, 1.5)
+    props["shards"].`enum` == List(1, 2, 4)
+    props["both"].minimum == 2
+    props["both"].`enum` == List(1, 2, 4, 8)
+    zod.contains("[256, 384, 521, 2048, 3072, 4096].includes(x)")
+    py.contains("AfterValidator(_one_of([256, 384, 521, 2048, 3072, 4096]))")
+    reference.contains("one of 256, 384, 521, 2048, 3072, 4096")
+  }
+  ["a required property with no default is in required without an extension key"] {
+    local props = schema("declared").properties
+    schema("declared").required == List("authorities", "selector", "region")
+    !props["authorities"].toMap().containsKey("x-set-at-install")
+    !props["region"].toMap().containsKey("x-set-at-install")
+    !props["authorities"].toMap().containsKey("default")
+    zod.contains("authorities: z.array(NonEmptyString).min(1),")
+    py.contains("authorities: Annotated[list[NonEmptyString], Field(min_length=1)]\n")
+    reference.contains("| `region` | NonEmptyString | yes |  | at least 1 character |")
+    // `@SetAtInstall` keeps its marker.
+    schema("blocks").properties["vault"].properties["token"]["x-set-at-install"] == true
+  }
+  ["a chart's own definitions are at the root of its values schema, and an empty one is not written"] {
+    local chart = Helm.valuesSchema(Model.chartOf(DefsChart)!!)
+    chart["$defs"].toMap().containsKey("stringMap")
+    chart["$defs"].toMap().containsKey("owner")
+    chart["$defs"]["stringMap"]
+      == (new Dynamic { type = "object"; additionalProperties { type = "string" } })
+    chart["$defs"]["owner"].required == List("name")
+    chart.properties["labels"]["$ref"] == "#/$defs/stringMap"
+    chart.properties["annotations"]["$ref"] == "#/$defs/stringMap"
+    chart.properties["owner"]["$ref"] == "#/$defs/owner"
+    // The platform's documents are there too, by `$id`.
+    chart["$defs"].toMap().keys.any((k) -> k.startsWith("https://"))
+    !Helm.valuesSchema(Model.chartOf(PlainChart)!!).toMap().containsKey("$defs")
   }
 }

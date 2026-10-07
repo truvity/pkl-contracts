@@ -1,0 +1,4 @@
+authorities: []
+selector:
+  app: web
+region: eu

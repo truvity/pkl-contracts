@@ -63,6 +63,11 @@ class Node {
   /// The expressions a string must NOT match (`@NotPattern`), each as data with
   /// `regex`, `reason` and `invalid`. Empty when there are none.
   notPatterns: List<Dynamic> = List()
+  /// A string with a `pattern` that may span lines (`@MultiLine`): the generators
+  /// leave out the guard that refuses every line break.
+  multiLine: Boolean = false
+  /// For `integer` and `number`: the numbers it may be (`@OneOfValues`), or null.
+  numericValues: List<Number>?
   /// The rules across fields written on an ALIAS of a class (`@RequiredWhen`,
   /// `@RequiredUnless`), each as `condition` describes. The ones written on the
   /// class or the module itself are `Cls.conditions`.
@@ -99,6 +104,13 @@ class Prop {
   /// The schema requires it and a chart's defaults leave it out (`@SetAtInstall`).
   /// It is nullable in Pkl, so that the module of defaults need not set it.
   setAtInstall: Boolean = false
+  /// The schema requires it, it has no default and a chart's defaults leave it
+  /// out, and nothing more is said (`@Required`); `setAtInstall` is the same plus
+  /// the claim that an install supplies it.
+  requiredOnly: Boolean = false
+  /// The value may be JSON `null` besides its type (`@Nullable`); the property is
+  /// still optional.
+  nullable: Boolean = false
   /// The property's value NAMES a secret (an environment variable, a Secret and
   /// key); it is never the secret itself. Read from the contract's own
   /// convention, because the vocabulary has no annotation for it: a property
@@ -176,7 +188,23 @@ local function annots(a: List<Annotation>): Dynamic = new Dynamic {
     a
       .filter((x) -> named(x, "NotPattern"))
       .map((x) -> x.toDynamic())
+  multiLine = find(a, "MultiLine") != null
+  oneOf = find(a, "OneOfValues")
 }
+
+/// The values of a `@OneOfValues` as the numbers of a node of kind `kind`, or an
+/// error: an integer's are whole, and the list is not empty.
+local function numbersOf(where: String, kind: String, vs: List<Number>): List<Number> =
+  if (kind != "integer" && kind != "number")
+    throw(
+      "\(where): @OneOfValues is for a number, and this is \(kind) (a set of strings is a literal union)"
+    )
+  else if (kind == "integer" && !vs.every((v) -> v == v.truncate()))
+    throw("\(where): @OneOfValues on an integer lists a number that is not whole")
+  else if (kind == "integer")
+    vs.map((v) -> v.toInt()).distinct
+  else
+    vs.distinct
 
 local function withAnnots(n: Node, a: List<Annotation>, adoc: String?, aalias: String?): Node =
   let (x = annots(a))
@@ -194,6 +222,18 @@ local function withAnnots(n: Node, a: List<Annotation>, adoc: String?, aalias: S
       when (x.itemBounds != null) { itemBounds = x.itemBounds }
       when (x.propertyBounds != null) { propertyBounds = x.propertyBounds }
       when (!x.notPatterns.isEmpty) { notPatterns = x.notPatterns }
+      when (x.multiLine) {
+        multiLine =
+          if (n.kind == "string" && (x.pattern != null || n.pattern != null))
+            true
+          else
+            throw(
+              "\(aalias ?? "a type"): @MultiLine lifts the line-break guard of a `pattern`, and this has none"
+            )
+      }
+      when (x.oneOf != null) {
+        numericValues = numbersOf(aalias ?? "a type", n.kind, x.oneOf.values)
+      }
     }
 
 function nodeOf(t: reflect.Type): Node =
@@ -372,10 +412,21 @@ local function narrowerCount(where: String, a: Dynamic, b: Dynamic?): Dynamic =
           }
         }
 
+/// The numbers a property's `@OneOfValues` allows laid over its type's: the
+/// intersection, which must leave a value.
+local function narrowerValues(where: String, n: Node, own: List<Number>): List<Number> =
+  let (vs = numbersOf(where, n.kind, own))
+  let (kept = if (n.numericValues == null) vs else vs.filter((v) -> n.numericValues.contains(v)))
+    if (kept.isEmpty)
+      throw("\(where): the values of the property and the ones of its type leave no value")
+    else
+      kept
+
 /// The type of a property, with the `@Range`, `@Length`, `@DenyKeys`, `@Items` and
 /// `@Properties` the property itself carries laid over the type's own. They narrow
 /// a number, a string, a map or open object, a list and a map or open object
-/// again, and nothing else; the type is then no longer the alias (zod and pydantic
+/// again, and nothing else (`@MultiLine` and `@OneOfValues` the same, for a string
+/// with a pattern and a number); the type is then no longer the alias (zod and pydantic
 /// would refer to the alias by name and lose the bound), so it is spelled out.
 local function narrowed(where: String, n: Node, a: List<Annotation>): Node =
   let (r = rangeIn(a))
@@ -383,8 +434,14 @@ local function narrowed(where: String, n: Node, a: List<Annotation>): Node =
   let (d = find(a, "DenyKeys"))
   let (it = itemsIn(a))
   let (pr = find(a, "Properties"))
-    if (r == null && l == null && d == null && it == null && pr == null)
+  let (ml = find(a, "MultiLine") != null)
+  let (ov = find(a, "OneOfValues"))
+    if (r == null && l == null && d == null && it == null && pr == null && !ml && ov == null)
       n
+    else if (ml && (n.kind != "string" || n.pattern == null))
+      throw(
+        "\(where): @MultiLine lifts the line-break guard of a `pattern`, and this property's type has none"
+      )
     else if (r != null && n.kind != "integer" && n.kind != "number")
       throw("\(where): @Range is for a number, and this property is \(n.kind)")
     else if (l != null && n.kind != "string")
@@ -395,6 +452,8 @@ local function narrowed(where: String, n: Node, a: List<Annotation>): Node =
       throw("\(where): @Items is for a list, and this property is \(n.kind)")
     else if (pr != null && n.kind != "map" && n.kind != "open")
       throw("\(where): @Properties is for a map or an open object, and this property is \(n.kind)")
+    else if (ov != null && narrowerValues(where, n, ov.values).isEmpty)
+      throw("unreachable")
     else
       (n) {
         alias = null
@@ -404,6 +463,8 @@ local function narrowed(where: String, n: Node, a: List<Annotation>): Node =
         when (d != null) { denyKeys = (n.denyKeys ?? List()) + d.keys.toList() }
         when (it != null) { itemBounds = narrowerCount(where, it, n.itemBounds) }
         when (pr != null) { propertyBounds = narrowerCount(where, pr, n.propertyBounds) }
+        when (ml) { multiLine = true }
+        when (ov != null) { numericValues = narrowerValues(where, n, ov.values) }
       }
 
 /// What Pkl gives a property of type `t` when nobody sets it: an instance of
@@ -473,6 +534,7 @@ local function defaultComplete(n: Node, seen: List<String>): Boolean =
     allProps(n.cls)
       .every((p) ->
         !p.setAtInstall
+          && !p.requiredOnly
           && (
             !p.bare
               || (
@@ -500,12 +562,32 @@ local function propOf(where: String, pname: String, p: reflect.Property): Prop =
   let (n = narrowed(here, nodeOf(p.type), p.annotations))
   let (nullable = p.type is reflect.NullableType)
   let (atInstall = find(p.annotations, "SetAtInstall") != null)
+  let (onlyRequired = find(p.annotations, "Required") != null)
+  let (acceptsNull = find(p.annotations, "Nullable") != null)
   let (explicit = !isScalarish(n) && explicitObject(p, n))
   let (own = if (isScalarish(n)) defaultOf(p, n) != null else explicit)
-  let (isBare = !atInstall && !nullable && !own)
+  let (isBare = !atInstall && !onlyRequired && !nullable && !own)
   let (implicitObject = isBare && defaultComplete(n, List()))
     if (nullableMember(p.type))
       throw(nullableMemberMessage(here))
+    else if (atInstall && onlyRequired)
+      throw(
+        "\(here): @SetAtInstall and @Required say the same thing; use one (SetAtInstall for a value only an install can give)"
+      )
+    else if (onlyRequired && !nullable)
+      throw(
+        "\(here): @Required needs a nullable type (`Listing<V.NonEmptyString>?`), so that the module of defaults can leave it out"
+      )
+    else if (onlyRequired && defaultOf(p, n) != null)
+      throw("\(here): @Required and a default contradict: the default is what it leaves out")
+    else if (acceptsNull && !nullable)
+      throw(
+        "\(here): @Nullable needs a nullable type (`Int?`): the property is optional, and `null` is a value besides"
+      )
+    else if (acceptsNull && (atInstall || onlyRequired))
+      throw(
+        "\(here): @Nullable and a required property contradict: a required property is present with a value"
+      )
     else if (atInstall && !nullable)
       throw(
         "\(here): @SetAtInstall needs a nullable type (`V.NonEmptyString?`), so that the module of defaults can leave it out"
@@ -522,9 +604,11 @@ local function propOf(where: String, pname: String, p: reflect.Property): Prop =
         type = n
         doc = p.docComment
         setAtInstall = atInstall
+        requiredOnly = onlyRequired
+        nullable = acceptsNull
         secret = pname.endsWith("Env") || namesSecret(n)
         bare = isBare
-        required = atInstall || (isBare && !implicitObject)
+        required = atInstall || onlyRequired || (isBare && !implicitObject)
         hasDefault = own || implicitObject
         default =
           if (own)
@@ -995,7 +1079,21 @@ function constraintsOf(n: Node): List<String> =
             "at most \(n.length.max) characters",
         )
     )
-    + (if (n.pattern == null) List() else List("matches `\(n.pattern.regex)`, never a line break"))
+    + (
+      if (n.pattern == null)
+        List()
+      else
+        List(
+          "matches `\(n.pattern.regex)`, "
+            + (if (n.multiLine) "may span lines" else "never a line break"),
+        )
+    )
+    + (
+      if (n.numericValues == null)
+        List()
+      else
+        List("one of \(n.numericValues.map((v) -> "\(v)").join(", "))")
+    )
     + n.notPatterns.map((p) -> "must not match `\(p.regex)` (\(p.reason))")
     + (if (n.itemBounds == null) List() else countPhrases(n.itemBounds, "item", "items"))
     + (

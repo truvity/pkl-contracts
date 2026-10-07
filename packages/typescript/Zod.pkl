@@ -32,7 +32,10 @@
 ///   - `@NotPattern` is a `refine` that refuses a match, with the rule's reason as
 ///     its message;
 ///   - a union is `z.union`, which, like JSON Schema's `anyOf`, accepts a value
-///     that is any member (see `JsonSchema`).
+///     that is any member (see `JsonSchema`);
+///   - `@Nullable` is `.nullable()` on the property (and it stays optional, or
+///     keeps its default); `@MultiLine` leaves out the `noLineBreak` refinement
+///     of its node; `@OneOfValues` is a `refine` that tests membership.
 ///
 /// Every class and alias is exported twice, as the schema and as the type
 /// (`z.infer`), under one name. A reference between classes is lazy, so the
@@ -95,6 +98,13 @@ local function range(n: Model.Node): String =
     + (if (n.range?.exclusiveMin != null) ".gt(\(n.range.exclusiveMin))" else "")
     + (if (n.range?.exclusiveMax != null) ".lt(\(n.range.exclusiveMax))" else "")
 
+/// A refinement that admits only the numbers `@OneOfValues` lists, or nothing.
+local function oneOf(n: Model.Node): String =
+  if (n.numericValues == null)
+    ""
+  else
+    ".refine((x) => [\(n.numericValues.map((v) -> lit(v)).join(", "))].includes(x), { message: \(lit("must be one of " + n.numericValues.map((v) -> "\(v)").join(", "))) })"
+
 /// `.min()`, `.max()` and the uniqueness refinement of an array's `@Items`, or
 /// nothing.
 local function itemBounds(n: Model.Node): String =
@@ -143,14 +153,21 @@ local function inner(n: Model.Node): String =
     "z.string()"
       + (if (n.length?.min != null) ".min(\(n.length.min))" else "")
       + (if (n.length?.max != null) ".max(\(n.length.max))" else "")
-      + (if (n.pattern != null) ".regex(\(regex(n.pattern.regex))).refine(noLineBreak)" else "")
+      + (
+        if (n.pattern == null)
+          ""
+        else if (n.multiLine)
+          ".regex(\(regex(n.pattern.regex)))"
+        else
+          ".regex(\(regex(n.pattern.regex))).refine(noLineBreak)"
+      )
       + n.notPatterns
         .map((p) -> ".refine((s) => !\(regex(p.regex)).test(s), { message: \(lit(p.reason)) })")
         .join("")
   else if (n.kind == "integer")
-    "z.number().int()" + range(n)
+    "z.number().int()" + range(n) + oneOf(n)
   else if (n.kind == "number")
-    "z.number()" + range(n)
+    "z.number()" + range(n) + oneOf(n)
   else if (n.kind == "boolean")
     "z.boolean()"
   else if (n.kind == "enum")
@@ -180,7 +197,7 @@ local function inner(n: Model.Node): String =
 
 local function field(p: Model.Prop): String =
   jsdoc(p.doc, "  ")
-    + "  \(key(p.name)): \(expr(p.type))"
+    + "  \(key(p.name)): \(expr(p.type))\(if (p.nullable) ".nullable()" else "")"
     + (
       if (p.hasDefault)
         ".default(\(lit(p.default)))"

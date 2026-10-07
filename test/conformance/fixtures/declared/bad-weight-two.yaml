@@ -1,0 +1,6 @@
+authorities:
+  - ca-one
+selector:
+  app: web
+region: eu
+weight: 2.0

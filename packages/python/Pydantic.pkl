@@ -36,6 +36,10 @@
 ///     writes its expressions in the subset the two share;
 ///   - a union is `X | Y`, which, like JSON Schema's `anyOf`, accepts a value that
 ///     is any member (see `JsonSchema`);
+///   - `@Nullable` is `| None` on the field, and the key is listed in the class's
+///     `_nullable`, which the model validator above reads so that it does not
+///     refuse that key's `null`; `@MultiLine` leaves out `_no_line_break` of its
+///     node; `@OneOfValues` is an `AfterValidator` (`_one_of`) that tests membership;
 ///   - a property whose name is not a usable attribute (`service-lib`, a Python
 ///     keyword such as `global`, a leading underscore or digit) is declared
 ///     under a safe name with
@@ -177,7 +181,7 @@ local function stringType(n: Model.Node): String =
     parts =
       List(
         if (sc != "") "StringConstraints(\(sc))" else null,
-        if (n.pattern != null) "AfterValidator(_no_line_break)" else null,
+        if (n.pattern != null && !n.multiLine) "AfterValidator(_no_line_break)" else null,
       ).filterNonNull()
         + n.notPatterns.map((p) ->
           "AfterValidator(_not_pattern(\(rawStr(p.regex)), \(lit(p.reason))))"
@@ -209,9 +213,12 @@ local function inner(n: Model.Node): String =
   if (n.kind == "string")
     stringType(n)
   else if (n.kind == "integer")
-    "Annotated[int, BeforeValidator(_integral)\(range(n))]"
+    "Annotated[int, BeforeValidator(_integral)\(range(n))\(oneOf(n))]"
   else if (n.kind == "number")
-    if (n.range == null) "float" else "Annotated[float\(range(n))]"
+    if (n.range == null && n.numericValues == null)
+      "float"
+    else
+      "Annotated[float\(range(n))\(oneOf(n))]"
   else if (n.kind == "boolean")
     "bool"
   else if (n.kind == "enum")
@@ -252,6 +259,13 @@ local function dict(base: String, n: Model.Node): String =
   )
     if (vs.isEmpty) base else "Annotated[\(base), \(vs.join(", "))]"
 
+/// The validator that admits only the numbers `@OneOfValues` lists, or nothing.
+local function oneOf(n: Model.Node): String =
+  if (n.numericValues == null)
+    ""
+  else
+    ", AfterValidator(_one_of(\(lit(n.numericValues))))"
+
 local function range(n: Model.Node): String =
   if (n.range == null)
     ""
@@ -287,7 +301,7 @@ local function fieldCall(p: Model.Prop): String =
 
 local function field(p: Model.Prop): String =
   comment(p.doc, "    ")
-    + "    \(pyName(p.name)): \(ann(p.type))\(if (!p.required && !p.hasDefault) " | None" else "")"
+    + "    \(pyName(p.name)): \(ann(p.type))\(if ((!p.required && !p.hasDefault) || p.nullable) " | None" else "")"
     + fieldCall(p)
     + "\n"
 
@@ -325,6 +339,22 @@ local function conditional(owner: String, conds: List<Model.Condition>): String 
         .join("")
       + "        return self\n"
 
+/// The keys of `c` that admit `null` (`@Nullable`), added to the ones its base
+/// has: `_Closed` refuses a `null` anywhere else.
+local function nullableKeys(c: Model.Cls): String =
+  let (
+    own =
+      c.props
+        .filter((p) -> p.nullable)
+        .map((p) -> lit(p.name))
+  )
+    if (own.isEmpty)
+      ""
+    else
+      "    _nullable: ClassVar[frozenset[str]] = "
+        + (if (c.base != null) "\(c.base.cls.qname)._nullable | " else "")
+        + "frozenset({\(own.join(", "))})\n"
+
 local function classBody(c: Model.Cls): String =
   "class \(c.qname)(\(if (c.base != null) c.base.cls.qname else "_Closed")):\n"
     + (
@@ -341,6 +371,7 @@ local function classBody(c: Model.Cls): String =
       else
         ""
     )
+    + nullableKeys(c)
     + (if (c.props.isEmpty) "    pass\n" else c.props.map((p) -> field(p)).join(""))
     + conditional(c.qname, c.conditions)
     + "\n\n"
@@ -357,7 +388,7 @@ local header: String =
 
   import json
   import re
-  from typing import Annotated, Any, Literal
+  from typing import Annotated, Any, ClassVar, Literal
 
   from pydantic import (
       AfterValidator,
@@ -383,6 +414,15 @@ local header: String =
       def check(value: str) -> str:
           if compiled.search(value):
               raise ValueError(f"must not match {pattern}: {reason}")
+          return value
+
+      return check
+
+
+  def _one_of(allowed: list[Any]):
+      def check(value: Any) -> Any:
+          if value not in allowed:
+              raise ValueError(f"must be one of {allowed}")
           return value
 
       return check
@@ -442,12 +482,15 @@ local header: String =
   class _Closed(BaseModel):
       model_config = ConfigDict(extra="forbid", strict=True)
 
+      # The keys that may be `null` (`@Nullable`); a subclass adds to its base's.
+      _nullable: ClassVar[frozenset[str]] = frozenset()
+
       @model_validator(mode="before")
       @classmethod
       def _optional_is_absent_not_null(cls, data: Any) -> Any:
           if isinstance(data, dict):
               for key, value in data.items():
-                  if value is None:
+                  if value is None and key not in cls._nullable:
                       raise ValueError(f"{key}: null is not a value; omit the key")
           return data
 

@@ -28,6 +28,7 @@ import (
 	"conformance.invalid/gen/blocks"
 	"conformance.invalid/gen/collections"
 	"conformance.invalid/gen/conditions"
+	"conformance.invalid/gen/declared"
 	"conformance.invalid/gen/installed"
 	"conformance.invalid/gen/literals"
 	"conformance.invalid/gen/logarchiver"
@@ -71,6 +72,7 @@ var structs = map[string]func() any{
 	"blocks":     func() any { return &blocks.Blocks{} },
 	"collections": func() any { return &collections.Collections{} },
 	"conditions": func() any { return &conditions.Conditions{} },
+	"declared":   func() any { return &declared.Declared{} },
 	"names":      func() any { return &names.Names{} },
 	"literals":   func() any { return &literals.Literals{} },
 	"union":      func() any { return &union.Union{} },
