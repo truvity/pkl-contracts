@@ -1,0 +1,10 @@
+/// A chart with no document and no definition in its values: its schema has
+/// nothing to put under `$defs`, and must not carry an empty one.
+@A.Chart { title = "plain chart values" }
+module contracts.test.PlainChart
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// How many replicas.
+replicas: V.PositiveInt = 1

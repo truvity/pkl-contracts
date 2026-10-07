@@ -5,6 +5,57 @@ per tag. The prose bullets are written for a consumer; the commit subjects under
 them are the GitHub Release's own list. All packages are released together
 under one version, so a heading covers all of them.
 
+## Unreleased
+
+Everything here is additive: a contract that uses none of it generates exactly
+the output it did, apart from the one case listed last. Together they let a
+contract say what its consumers used to patch into the generated schema.
+
+### Features
+
+- **`@A.MultiLine`: a pattern that may span lines.** Every `pattern` is paired with
+  a guard that refuses the seven line breaks, and stays so by default. On an alias,
+  or on a property whose type has a `@A.Pattern`, the annotation drops the guard
+  for that node: the JSON Schema keeps the `pattern` and loses
+  `not: { pattern: <line breaks> }`, zod its `noLineBreak` refinement, pydantic its
+  `_no_line_break` validator. For a PEM bundle matched by an unanchored marker.
+  The model refuses it on a type with no pattern.
+- **`@A.Nullable`: a property that admits JSON `null`, and is still optional.** On
+  a property typed `T?`. JSON Schema is `type: [<t>, "null"]` where the type is a
+  keyword (with a `null` member added to an `enum`) and
+  `anyOf: [<schema>, { type: "null" }]` where it is a `$ref` or already an `anyOf`;
+  zod `.nullable()`; pydantic `| None`, with the key listed in the class's
+  `_nullable`, which the "null is not a value" validator of the base model reads.
+  The loader and `Check` accept `null` for it. Refused beside `@A.Required` and on
+  a type that is not `T?`.
+- **`@A.OneOfValues { values = List(...) }`: a set of numbers.** JSON Schema `enum`
+  beside `type: integer` or `number` (with a `null` member when the property is
+  also `@A.Nullable`); a zod `refine`; a pydantic `AfterValidator`; the reference
+  says "one of ...". On an alias, or on a property, where it narrows the type's own
+  set and combines with `@A.Range`; Pkl enforces a property's through `Check`.
+- **`@A.Required`: required, no default, nothing else.** For a list, an open object
+  or a number that a document must carry, where Pkl would give a `Listing` or a
+  `Dynamic` an empty default and `T?` is optional. It is `@A.SetAtInstall` without
+  the claim that an install supplies it: in `required`, no `default`, no
+  `x-set-at-install` key, "Required" (not "Set at install") in the reference and the
+  values table, left out of the defaults, and no demand that a string be non-empty.
+  `@A.SetAtInstall` is unchanged and stays the spelling for a value only an
+  install can give.
+- **Helm: a chart's own `@Def` definitions are in the root `$defs`.** Until now only
+  the `@Schema` documents were, so a `$ref: "#/$defs/<name>"` to a definition used
+  in the chart's own values dangled. They are written by name, beside the documents
+  by `$id`. A chart with neither no longer gets an empty `$defs`.
+- Fixtures: the `declared` contract (57 documents, good and bad, for the four
+  annotations) and the `defs` chart, across every validator.
+
+### Changed output
+
+- The generated pydantic module gains two helpers (`_one_of`, and a `_nullable`
+  class variable on the base model), and the Helm values schema omits an empty
+  `$defs`. Neither changes what any document is accepted or refused as, so the
+  compatibility check has nothing to report; `examples/service/generated/py` is
+  regenerated.
+
 ## v0.5.0 — 2026-10-07
 
 ### Breaking

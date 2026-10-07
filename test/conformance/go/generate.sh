@@ -36,6 +36,7 @@ rm -rf gen
   --mapping conformance.contract.Conditions=$pkg/conditions \
   --mapping conformance.contract.Literals=$pkg/literals \
   --mapping conformance.contract.Collections=$pkg/collections \
+  --mapping conformance.contract.Declared=$pkg/declared \
   --mapping conformance.union.Union=$pkg/union \
   "$base/contracts.vocab@$version#/Vocab.pkl" \
   "$base/contracts.fragments@$version#/Fragments.pkl" \

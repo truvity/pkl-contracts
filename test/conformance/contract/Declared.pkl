@@ -1,0 +1,123 @@
+/// What a contract has to DECLARE because the defaults say otherwise: a value
+/// that spans lines, a property that takes `null`, a set of numbers, and a list
+/// or object that is required without being "set at install". Every artifact
+/// must agree on each, and Pkl's own reading is the oracle.
+@A.Schema { id = "https://example.com/schemas/declared.json"; title = "declared" }
+module conformance.contract.Declared
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+local const markerRe = "-----BEGIN CERTIFICATE-----"
+
+/// A PEM bundle, found by its marker: several lines by declaration, on the alias.
+@A.MultiLine
+@A.Pattern {
+  regex = markerRe
+  valid { "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----" }
+  invalid { "not a certificate" }
+}
+typealias PemBundle = String(contains(Regex(markerRe)))
+
+/// The same marker, and a value on one line: the default, guarded.
+@A.Pattern {
+  regex = markerRe
+  valid { "-----BEGIN CERTIFICATE-----" }
+  invalid { "not a certificate"; "-----BEGIN CERTIFICATE-----\n" }
+}
+typealias Marker = String(!V.lineBreaks.any((b) -> contains(b)) && contains(Regex(markerRe)))
+
+/// The marker again, with no line-break rule of its own in Pkl: used only where a
+/// property declares `@MultiLine`.
+@A.Pattern {
+  regex = markerRe
+  valid { "-----BEGIN CERTIFICATE-----" }
+  invalid { "not a certificate" }
+}
+typealias OpenMarker = String(contains(Regex(markerRe)))
+
+/// A name shared by definition: a `$ref` to `#/$defs/tag`.
+@A.Def { name = "tag" }
+@A.Length { min = 1 }
+typealias Tag = String(length >= 1)
+
+/// A shard count: one of a few, as the alias's own rule.
+@A.OneOfValues { values = List(1, 2, 4) }
+typealias Shards = Int(this == 1 || this == 2 || this == 4)
+
+/// A bundle of certificates, several lines (the alias is multi-line).
+bundle: PemBundle?
+
+/// One certificate marker on one line: a line break is refused.
+single: Marker?
+
+/// A bundle whose line breaks the PROPERTY allows, over an alias that has no rule.
+@A.MultiLine
+openBundle: OpenMarker?
+
+/// The authorities, at least one. Required, with no default, and not "set at install".
+@A.Required
+@A.Items { min = 1 }
+authorities: Listing<V.NonEmptyString>?
+
+/// A selector, taken whole. Required, with no default.
+@A.Required
+selector: V.OpenObject?
+
+/// The region. Required, and a plain string.
+@A.Required
+region: V.NonEmptyString?
+
+/// How many instances; `null` means the profile decides. At least one.
+@A.Nullable
+@A.Range { min = 1 }
+instances: V.PositiveInt?
+
+/// Optional, and `null` is not a value.
+plain: V.PositiveInt?
+
+/// A name, or `null` for the default one.
+@A.Nullable
+name: V.NonEmptyString?
+
+/// A level, or `null`: the `null` is a member of the enum.
+@A.Nullable
+level: V.LogLevel?
+
+/// Labels, or `null`.
+@A.Nullable
+labels: Mapping<String, V.NonEmptyString>?
+
+/// A list, or `null`, with at least one item when it is there.
+@A.Nullable
+@A.Items { min = 1 }
+entries: Listing<V.NonEmptyString>?
+
+/// A secret reference, or `null`.
+@A.Nullable
+secret: V.SecretRef?
+
+/// A tag by `$ref`, or `null`.
+@A.Nullable
+tag: Tag?
+
+/// A key size, or `null` for the issuer's default.
+@A.Nullable
+@A.OneOfValues { values = List(256, 384, 521, 2048, 3072, 4096) }
+size: Int?
+
+/// A number of replicas, of a few, with a default.
+@A.OneOfValues { values = List(1, 2, 4) }
+replicas: Int = 2
+
+/// A weight, of a few numbers that are not whole.
+@A.OneOfValues { values = List(0.25, 0.5, 1.5) }
+weight: Float?
+
+/// A shard count, by an alias that states the set.
+shards: Shards?
+
+/// A set and a range together: both hold.
+@A.Range { min = 2 }
+@A.OneOfValues { values = List(1, 2, 4, 8) }
+both: Int?

@@ -1,0 +1,20 @@
+authorities:
+  - ca-one
+selector:
+  app: web
+region: eu
+bundle: "-----BEGIN CERTIFICATE-----\nMIIB"
+single: "-----BEGIN CERTIFICATE-----"
+openBundle: "-----BEGIN CERTIFICATE-----\nx"
+instances: null
+name: null
+level: null
+labels: null
+entries: null
+secret: null
+tag: null
+size: null
+replicas: 1
+weight: 1.5
+shards: 2
+both: 4

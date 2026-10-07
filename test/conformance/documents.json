@@ -12,6 +12,7 @@
   "names": {"schema": "names.json", "module": "conformance/contract/Names.pkl"},
   "literals": {"schema": "literals.json", "module": "conformance/contract/Literals.pkl"},
   "conditions": {"schema": "conditions.json", "module": "conformance/contract/Conditions.pkl"},
+  "declared": {"schema": "declared.json", "module": "conformance/contract/Declared.pkl"},
   "collections": {"schema": "collections.json", "module": "conformance/contract/Collections.pkl"},
   "union": {"schema": "union.json", "module": "conformance/union/Union.pkl"},
   "shortener": {"schema": "shortener.json", "module": "conformance/contract/Shortener.pkl"},

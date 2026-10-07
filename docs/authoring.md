@@ -344,11 +344,160 @@ nothing needs to parse it.
 It is never combined with a default, and on a string it needs a type that refuses
 `""`, so that the requirement is of a real value.
 
+`@A.SetAtInstall` is the spelling for a value only an install can give, and it is
+specific on purpose: the `x-set-at-install: true` key and the "Set at install"
+column let a tool (a chart linter, a bootstrap script) list what an install must
+supply, apart from what a document must merely contain. A required list or open
+object that is NOT such a value (a CA bundle, a set of roles) is `@A.Required`
+(below), which says "required, no default" and nothing else.
+
 *Checked by:* the model, when it reflects the contract (an annotation on a type
 that is not nullable, on a string that may be empty, or beside a default is an
 error); `hack/defaults-check.py`, which reads the generated schemas, values,
 zod, pydantic and reference and fails on a set-at-install property that is
 optional, defaulted or present in `values.yaml`; and the conformance fixtures.
+
+## Declaring what the defaults cannot say
+
+Four things the generators cannot know from a Pkl type are declared with an
+annotation. Each is additive: a contract that does not use one is generated
+exactly as before.
+
+### A value that spans lines: `@A.MultiLine`
+
+Every `pattern` is paired with a guard that refuses all seven line breaks (the
+semantic rules, below), because `$` and `.` mean different things at a line break
+in different engines, so no pattern may be trusted to refuse one. The default
+stays guarded: a value that is one line is what almost every field wants, and the
+guard is the only thing that makes the engines agree. A value that is legitimately
+several lines, such as a PEM bundle matched by a search for its marker, is
+declared:
+
+```pkl
+local const pemRe = "-----BEGIN CERTIFICATE-----"
+
+/// A PEM bundle, found by its marker.
+@A.MultiLine
+@A.Pattern { regex = pemRe; valid { "-----BEGIN CERTIFICATE-----\nMIIB" }; invalid { "x" } }
+typealias PemBundle = String(contains(Regex(pemRe)))
+```
+
+On the alias, or on a property whose type has a `@A.Pattern`. JSON Schema keeps
+the `pattern` and drops `not: { pattern: <line breaks> }`; zod drops its
+`noLineBreak` refinement and pydantic its `_no_line_break` validator. Nothing else
+changes: the pattern itself must still mean the same in every engine on a
+multi-line value, so write it unanchored (a search for a marker), or with `[\s\S]`
+where it has to cross lines, and never rely on `^`, `$` or `.` at a line break.
+The Pkl type must not refuse a line break either (a vocabulary alias does, through
+`search`; this annotation does not lift that, so on a property it goes over a type
+written for the purpose). The model refuses the annotation on a type with no
+pattern, where there is no guard to lift.
+
+*Checked by:* `test/LintTest.pkl` (the refusal), `test/GeneratorsTest.pkl` (the
+output of each generator), and the conformance contract `declared`, whose
+fixtures send a multi-line value to a declared field (accepted by all) and to a
+guarded one (refused by all).
+
+### A property that admits `null`: `@A.Nullable`
+
+An optional property is absent or present with a value, and `null` is a type error
+in every validator. Where `null` is itself a value (`instances: null` for "the
+profile decides"), the property declares it. It is written `T?` in Pkl and is
+still optional, so a document may leave it out, give a value, or give `null`:
+
+```pkl
+/// How many instances; `null` means the profile decides.
+@A.Nullable
+@A.Range { min = 1 }
+instances: V.PositiveInt?
+```
+
+JSON Schema has two correct spellings of "`null` or this", and the generator uses
+the one that fits the schema it has. Where the type is a keyword (a scalar, a
+list, a map, a class, a union of scalars) `"null"` joins the `type` list, and an
+`enum` gets a `null` member: `{ "type": ["integer", "null"], "minimum": 1 }`. The
+other keywords apply to an instance of their own type only, so they let `null`
+through. Where the schema is a `$ref` or an `anyOf` (a `@Def`, a union with a
+member that needs its own schema) it is `{ "anyOf": [<schema>, { "type": "null" }] }`.
+Both are accepted by every engine of the conformance suite with one meaning. zod
+adds `.nullable()`; pydantic `| None`, and lists the key in the class's
+`_nullable` so that the model validator that refuses a stray `null` leaves it.
+
+It is the property's, not the type's: there is no `@A.Nullable` on an alias, because
+an alias that is nullable is read as required (the trap above). The model refuses
+it on a type that is not `T?`, and beside `@A.Required`. The Pkl loader and `Check`
+read `null` as a value for this property only.
+
+*Checked by:* `test/LintTest.pkl`, `test/GeneratorsTest.pkl` and the `declared`
+fixtures (`null` accepted for each declared property, refused for the one that
+did not declare it and for a required one).
+
+### A set of numbers: `@A.OneOfValues`
+
+Pkl's literal types are strings, so `2048 | 4096` is not a type. A set of numbers
+is an annotation, with `List(...)` (a `Listing` is not accepted):
+
+```pkl
+/// RSA or ECDSA key size; null is the issuer's default.
+@A.Nullable
+@A.OneOfValues { values = List(256, 384, 521, 2048, 3072, 4096) }
+size: Int?
+```
+
+JSON Schema `enum` beside `type: integer` (or `number`); when the property is also
+`@A.Nullable` the `enum` carries a `null` member, as the `type` does:
+`{ "type": ["integer", "null"], "enum": [256, ..., 4096, null] }`. zod a `refine` that
+tests membership, pydantic an `AfterValidator`, the reference "one of ...". On an
+alias it is the alias's own, and the alias writes the same set as its Pkl
+constraint (`Int(this == 1 || this == 2)`); on a property it narrows the type's
+(the intersection, which must leave a value) and `Check` makes Pkl enforce it. It
+combines with `@A.Range` (both hold). The model refuses it on a type that is not
+a number, and on an integer whose list has a member that is not whole. A set of
+strings is a literal union, not this.
+
+*Checked by:* `test/LintTest.pkl`, `Check` against Pkl, and the `declared` fixtures
+(a member accepted, a number outside refused, a string and a fraction refused,
+the set with a range and with `null`).
+
+### Required, with no default, and nothing else: `@A.Required`
+
+Pkl gives a `Listing`, a `Mapping` or a `Dynamic` an implicit default (the empty
+one), so a list or an open object that a document MUST carry cannot be written as
+a plain property; a property typed `T?` is optional. `@A.SetAtInstall` could say
+it, but it also claims the value is one an install supplies, adds
+`x-set-at-install: true` and asks a string to be non-empty. `@A.Required` is the
+plain path:
+
+```pkl
+/// The authorities. Required, no default.
+@A.Required
+@A.Items { min = 1 }
+authorities: Listing<V.NonEmptyString>?
+```
+
+Written `T?`, so that the module that holds the defaults need not set it, and
+annotated, so that every generator and the loader require it: it is in the schema's
+`required`, has no `default`, and carries no extension key; the zod and pydantic
+field is not optional; the reference and the values table say "Required"; the
+defaults leave it out. It asks nothing of the type, never has a default, and is
+never combined with `@A.SetAtInstall` or `@A.Nullable`.
+
+*Checked by:* `test/LintTest.pkl`, `test/GeneratorsTest.pkl` and the `declared`
+fixtures (a document without each of the three, with `null` and with an empty
+list is refused by every validator).
+
+### A chart's own `@Def`
+
+A chart's values schema embeds the documents its values refer to under `$defs`,
+each by its `$id`. A `@A.Def` alias or class used in the chart's own values is
+now written there too, by its name, so that `$ref: "#/$defs/<name>"` resolves; a
+definition used inside a document stays in that document's `$defs`. The key is
+not written when there is nothing to put in it. This was a gap in the Helm
+generator, not something a contract declares: nothing to write beyond `@A.Def`.
+
+*Checked by:* the conformance chart `defs` (values accepted and refused through
+the references, by the four JSON Schema engines, compiled alone) and
+`test/GeneratorsTest.pkl`.
 
 ## A default may be an object
 
@@ -428,7 +577,8 @@ contract picks one meaning:
   (and the first with each before it), is refused. A generator must say the same
   in its output, with the guard its target spells: JSON Schema pairs each
   `pattern` with `not: { pattern: "[...]" }` over the seven, zod with a
-  refinement, pydantic with a validator.
+  refinement, pydantic with a validator. A value that really is several lines is
+  declared with `@A.MultiLine` (see "Declaring what the defaults cannot say").
   *Checked by:* `hack/lint.sh` (no `matches`, one `Regex(`, the alias and its
   annotation name the same constant) and the probes; `test/LintTest.pkl` checks
   that the vocabulary's list and the generators' are the same.
@@ -451,7 +601,8 @@ contract picks one meaning:
   contract never writes one and a field is never both nullable and defaulted.
   zod's `.optional()` and JSON Schema's types refuse `null`; pydantic needs a
   validator that runs first and refuses it; the test loader (`test/Load.pkl`),
-  which asks Pkl "is this document valid", refuses it too.
+  which asks Pkl "is this document valid", refuses it too. A value that means
+  something as `null` is the exception, and says so with `@A.Nullable` (below).
   *Checked by:* `hack/lint.sh` (no `= null`) and `test/LintTest.pkl` (no
   nullable field with a default).
 - **An integral float is an integer.** `20.0` is valid where an integer is

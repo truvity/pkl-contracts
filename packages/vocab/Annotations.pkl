@@ -139,6 +139,80 @@ class Properties extends Annotation {
 /// combined with a default.
 class SetAtInstall extends Annotation {}
 
+/// A property the document MUST carry and that has no default, with nothing else
+/// said about it: no `x-set-at-install` key, and no claim that an install is what
+/// supplies it. It is `@SetAtInstall` for the cases that are not "set at install":
+/// a list the caller must give (a CA bundle, a set of roles), an open object a
+/// chart takes whole, a number with no sensible default. Pkl has no way to say it
+/// otherwise: a `Listing` or a `Dynamic` always has an implicit default (the empty
+/// one), and a property typed `T?` is optional.
+///
+/// Write the property `T?` in Pkl, so that the module that holds the defaults need
+/// not set it, and annotate it; every generator and the test loader then require
+/// it. It is never combined with a default or with `@Nullable` (a property that
+/// must be present AND may be `null` is a value the contract has to decide on).
+/// Unlike `@SetAtInstall` it asks nothing of the type: a string may be empty if its
+/// type admits `""`.
+///
+/// `@SetAtInstall` stays the spelling for a value only an install can give: it
+/// additionally marks the property `x-set-at-install: true` in a JSON Schema and
+/// "Set at install" in the reference, which tools read to find what a chart's
+/// defaults leave out.
+class Required extends Annotation {}
+
+/// A property that admits the JSON value `null` as well as its type, and is still
+/// optional: the key may be absent, or present with a value, or present with
+/// `null`. This is not what an optional property is by default: `T?` means
+/// "absent", and `null` is refused as a type error by every validator (decision
+/// 0010), because a document that says `x: null` and one that says nothing would
+/// otherwise be two spellings of one thing. A value that means something by
+/// itself, as `instances: null` for "the profile decides", is declared.
+///
+/// On a PROPERTY whose Pkl type is nullable (`Int?`). The JSON Schema is
+/// `type: [<t>, "null"]` where the type is a plain keyword (and `"null"` is also
+/// appended to an `enum`), and `anyOf: [<schema>, { type: "null" }]` where it is
+/// not (a `$ref`, or a union that is already an `anyOf`): both are accepted by
+/// every engine of the conformance suite and mean the same thing. zod adds
+/// `.nullable()` and pydantic `| None`, with the `null` check of the model lifted
+/// for this key.
+///
+/// The rest of the property's schema (`minimum`, `pattern`, `items`) applies to a
+/// non-null value only, as in JSON Schema. Not on an alias: whether a property
+/// takes `null` is the property's business, not the type's.
+class Nullable extends Annotation {}
+
+/// The numbers a numeric property may be. Pkl's literal types are strings, so a
+/// set of numbers is stated here: JSON Schema `enum` (and `type: integer` or
+/// `number`), zod a refinement, pydantic a validator. On an alias it is the
+/// alias's own and the alias also writes the set as its Pkl constraint; on a
+/// PROPERTY it narrows the type it has (the intersection of the two lists) and
+/// `Check.pkl` makes Pkl enforce it. It combines with `@Range` (both hold) and with
+/// `@Nullable` (`null` is then a member of the `enum` as well as of the type).
+///
+/// A set of strings is a literal union (`"a" | "b"`), not this.
+class OneOfValues extends Annotation {
+  /// The numbers allowed. At least one, and each an integer where the type is.
+  values: List<Number>(!isEmpty)
+}
+
+/// A string alias or property that is legitimately more than one line, such as a
+/// PEM bundle matched by an unanchored `@Pattern`. Every `pattern` is paired, by
+/// default, with a clause that refuses all seven line breaks (see the `Pattern`
+/// annotation): engines disagree about what `$` and `.` do at a line break, so a
+/// pattern cannot be trusted to refuse one, and the default is that a value never
+/// contains one. This annotation lifts that guard for the node it is on: the JSON
+/// Schema keeps the `pattern` and drops the `not: { pattern: <line breaks> }`, zod
+/// drops its `noLineBreak` refinement and pydantic its `_no_line_break` validator.
+///
+/// The pattern itself must still mean the same in every engine on a multi-line
+/// value, which is the author's to check: write it unanchored (a search for a
+/// marker such as `-----BEGIN CERTIFICATE-----`), or with `[\s\S]` where it has to
+/// cross lines, and never rely on `$`, `^` or `.` at a line break. Pkl's own alias
+/// must not refuse a line break either (a vocabulary alias does, through `search`).
+/// On an alias or a property whose type has a `@Pattern`; nothing else has a guard
+/// to lift.
+class MultiLine extends Annotation {}
+
 /// A JSON Schema `format`: documentation, not validation.
 class Format extends Annotation {
   /// The format's name, for example `uri`.

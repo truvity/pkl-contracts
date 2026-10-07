@@ -23,7 +23,8 @@
 ///     JSON of the default the contract gives it;
 ///   - a property that is set at install is in `required` and has no default, and
 ///     says so with `x-set-at-install: true` (an annotation: a validator ignores
-///     it, a tool reads it instead of parsing the description);
+///     it, a tool reads it instead of parsing the description); one that is only
+///     `@Required` is in `required` with no default and no extension key;
 ///   - an integral float is an integer: `type: integer` says so;
 ///   - a field with a default is optional: it is not in `required`. So is an object
 ///     whose class gives every field a default, or leaves it nullable, or holds
@@ -31,7 +32,10 @@
 ///     `default` is that instance, rendered whole, because a validator does not
 ///     fill a default in and a reader must still find what it will be;
 ///   - `null` is not a value for an optional field: a property's type does not
-///     include `null`, so `null` is a type error.
+///     include `null`, so `null` is a type error. A property that declares
+///     `@Nullable` is the exception: its schema admits `null` (`orNull`, below).
+///   - `@MultiLine` leaves out the line-break guard of its node; `@OneOfValues` is
+///     an `enum` of numbers.
 ///   - a union of types is `anyOf`, never `oneOf`. Pkl accepts a value that
 ///     conforms to ANY member of a union, and so must the schema. `oneOf` also
 ///     refuses a value that conforms to two members; where the members cannot
@@ -56,6 +60,11 @@ local const function bounds(d: Dynamic, r: Dynamic?): Dynamic = (d) {
   when (r?.exclusiveMax != null) { exclusiveMaximum = r.exclusiveMax }
 }
 
+/// `d` with the `enum` of the numbers a node may be (`@OneOfValues`), if it has any.
+local const function withValues(d: Dynamic, n: Model.Node): Dynamic = (d) {
+  when (n.numericValues != null) { `enum` = n.numericValues }
+}
+
 /// `propertyNames` for a map or an open object: what its key type says (a
 /// pattern, an enum) and the keys `@DenyKeys` refuses, as one schema, joined by
 /// `allOf` when there are several (both need `not`, which a schema has once).
@@ -64,7 +73,10 @@ local function propertyNames(n: Model.Node): Dynamic? =
     parts =
       (
         if (n.kind == "map" && n.key.pattern != null)
-          List(new Dynamic { pattern = n.key.pattern.regex; not = noLineBreak })
+          List(new Dynamic {
+            pattern = n.key.pattern.regex
+            when (!n.key.multiLine) { not = noLineBreak }
+          })
         else
           List()
       )
@@ -110,7 +122,8 @@ local function body(n: Model.Node): Dynamic =
       when (n.length?.max != null) { maxLength = n.length.max }
       when (n.pattern != null) {
         pattern = n.pattern.regex
-        not = noLineBreak
+        // The guard stays unless the contract declared the value multi-line.
+        when (!n.multiLine) { not = noLineBreak }
       }
       when (n.format != null) { format = n.format.name }
       // `@NotPattern`: one `not: { pattern }` for each rule, joined by `allOf`
@@ -120,9 +133,9 @@ local function body(n: Model.Node): Dynamic =
       }
     }
   else if (n.kind == "integer")
-    bounds(new Dynamic { type = "integer" }, n.range)
+    withValues(bounds(new Dynamic { type = "integer" }, n.range), n)
   else if (n.kind == "number")
-    bounds(new Dynamic { type = "number" }, n.range)
+    withValues(bounds(new Dynamic { type = "number" }, n.range), n)
   else if (n.kind == "boolean")
     new Dynamic { type = "boolean" }
   else if (n.kind == "list")
@@ -177,6 +190,10 @@ local function body(n: Model.Node): Dynamic =
     }
   else
     new Dynamic {}
+
+/// The schema a `@Def` node is stored under in `$defs`: its own body, whereas
+/// `ofNode` of it is the `$ref` to that entry.
+function definition(d: Model.Node): Dynamic = body(d)
 
 /// The rules across fields of an object node: the ones its alias carries and the
 /// ones its class (or module) does.
@@ -233,7 +250,41 @@ local function conditional(r: Model.Condition): Dynamic =
         then = present(r.paths)
       }
 
-local function propSchema(p: Model.Prop): Dynamic = (ofNode(p.type)) {
+/// The schema `{ type: "null" }`, a member of the `anyOf` of a nullable property
+/// whose type cannot take the `type: [<t>, "null"]` form.
+local nullSchema: Dynamic = new Dynamic { type = "null" }
+
+/// `s`, the schema of a property's type, widened to admit `null` as well
+/// (`@Nullable`). Two forms, chosen by what `s` is, and both mean "the value is
+/// null or satisfies `s`" in every engine:
+///
+///   - `s` has a `type` keyword (a scalar, a list, a map, an object, a union of
+///     scalars): `"null"` joins the `type` list, and joins the `enum` when there
+///     is one. The other keywords (`minimum`, `pattern`, `items`, `properties`)
+///     apply to an instance of their own type only, so they let `null` through;
+///   - `s` is a `$ref` or an `anyOf` (a document, a definition, a union with a
+///     member that needs its own schema), or an `enum` with no `type` (a string
+///     enum): a `$ref` is wrapped, `{ type: "null" }` is added to an `anyOf`, and
+///     `null` to an `enum`.
+local function orNull(s: Dynamic): Dynamic =
+  let (m = s.toMap())
+    if (m.containsKey("$ref"))
+      new Dynamic { anyOf = List(s, nullSchema) }
+    else if (m.containsKey("anyOf"))
+      (s) { anyOf = s.anyOf.toList() + List(nullSchema) }
+    else if (m.containsKey("type"))
+      (s) {
+        type = (if (s.type is List) s.type else List(s.type)) + List("null")
+        when (m.containsKey("enum")) { `enum` = s.`enum`.toList() + List(null) }
+      }
+    else if (m.containsKey("enum"))
+      (s) { `enum` = s.`enum`.toList() + List(null) }
+    else
+      s
+
+local function propSchema(p: Model.Prop): Dynamic = (
+  if (p.nullable) orNull(ofNode(p.type)) else ofNode(p.type)
+) {
   when (p.doc != null) { description = p.doc }
   when (p.hasDefault) { ["default"] = p.default }
   when (p.setAtInstall) { ["x-set-at-install"] = true }

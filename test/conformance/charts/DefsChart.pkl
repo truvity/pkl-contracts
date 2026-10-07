@@ -1,0 +1,43 @@
+/// The values of a chart that uses `@Def` definitions of its own: a map of strings
+/// used twice and a class, each reached by `$ref: "#/$defs/<name>"` from the
+/// chart's values schema. The schema must carry the definitions at its root, or
+/// the references dangle.
+@A.Chart { title = "defs chart values" }
+module conformance.charts.DefsChart
+
+extends "@templates/ChartValues.pkl"
+
+import "@fragments/Platform.pkl"
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// A map of strings (labels, annotations).
+@A.Def { name = "stringMap" }
+typealias StringMap = Mapping<String, String>
+
+/// Labels for every object.
+labels: StringMap = new Mapping { ["app"] = "defs" }
+
+/// Annotations for every object.
+annotations: StringMap = new Mapping {}
+
+/// Who owns the release.
+owner: Owner
+
+/// The owner of a release.
+@A.Def { name = "owner" }
+class Owner {
+  /// The owner's name.
+  name: V.NonEmptyString
+  /// How to reach the owner.
+  contact: V.NonEmptyString?
+}
+
+/// The one image this chart ships.
+images: Images
+
+/// The images of this chart, by component.
+class Images {
+  /// The service's image.
+  defs: Platform.PlatformImage
+}

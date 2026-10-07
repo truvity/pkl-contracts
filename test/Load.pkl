@@ -5,8 +5,11 @@
 /// (Pkl would take it, because an optional type is nullable), and an integral
 /// float is an integer (Pkl's `Int` refuses `20.0`).
 ///
+/// `@Nullable` is the exception to the first: a property that declares it takes
+/// `null`.
+///
 /// Two more things Pkl's types cannot say are said here. A property that is
-/// `@SetAtInstall` is nullable in Pkl, so that the module of defaults may leave
+/// `@SetAtInstall` or `@Required` is nullable in Pkl, so that the module of defaults may leave
 /// it out, and is REQUIRED of a document: the loader refuses a document without
 /// it. And a property's own `@Range` and `@Length` are enforced by
 /// `contracts.vocab.Check`, which the loaded document is passed through.
@@ -95,7 +98,16 @@ local function typed(v: Any, c: reflect.Class): Any =
   if (v is Dynamic)
     let (props = c.allProperties.toMap().filter((_, p) -> !p.modifiers.contains("hidden")))
     let (extra = v.toMap().keys.filter((k) -> !props.containsKey(k)))
-    let (nulls = v.toMap().filter((_, e) -> e == null).keys)
+    let (
+      nulls =
+        v
+          .toMap()
+          .filter((k, e) ->
+            e == null
+              && !(props.containsKey(k) && props[k].annotations.any((a) -> named(a, "Nullable")))
+          )
+          .keys
+    )
     // Pkl gives an absent object property the default of its class, so a nested
     // `@SetAtInstall` (or a required field) inside it would go unnoticed. Reading
     // the absent object as an empty document finds it; the result is discarded,
@@ -109,14 +121,18 @@ local function typed(v: Any, c: reflect.Class): Any =
     let (
       unset =
         props
-          .filter((_, p) -> p.annotations.any((a) -> named(a, "SetAtInstall")))
+          .filter((_, p) ->
+            p.annotations.any((a) -> named(a, "SetAtInstall") || named(a, "Required"))
+          )
           .keys
           .filter((k) -> !v.toMap().containsKey(k))
     )
       if (absent.length < 0)
         throw("unreachable")
       else if (!unset.isEmpty)
-        throw("`\(unset.first)` in class `\(c.name)` is set at install: the document must set it")
+        throw(
+          "`\(unset.first)` in class `\(c.name)` is required and has no default: the document must set it"
+        )
       else if (!extra.isEmpty)
         throw("Cannot find property `\(extra.first)` in class `\(c.name)`")
       else if (!nulls.isEmpty)

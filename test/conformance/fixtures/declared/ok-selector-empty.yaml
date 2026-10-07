@@ -1,0 +1,4 @@
+authorities:
+  - ca-one
+selector: {}
+region: eu

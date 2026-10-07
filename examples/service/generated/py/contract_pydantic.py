@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import (
     AfterValidator,
@@ -29,6 +29,15 @@ def _not_pattern(pattern: str, reason: str):
     def check(value: str) -> str:
         if compiled.search(value):
             raise ValueError(f"must not match {pattern}: {reason}")
+        return value
+
+    return check
+
+
+def _one_of(allowed: list[Any]):
+    def check(value: Any) -> Any:
+        if value not in allowed:
+            raise ValueError(f"must be one of {allowed}")
         return value
 
     return check
@@ -88,12 +97,15 @@ def _has_keys(keys: list[str]):
 class _Closed(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    # The keys that may be `null` (`@Nullable`); a subclass adds to its base's.
+    _nullable: ClassVar[frozenset[str]] = frozenset()
+
     @model_validator(mode="before")
     @classmethod
     def _optional_is_absent_not_null(cls, data: Any) -> Any:
         if isinstance(data, dict):
             for key, value in data.items():
-                if value is None:
+                if value is None and key not in cls._nullable:
                     raise ValueError(f"{key}: null is not a value; omit the key")
         return data
 

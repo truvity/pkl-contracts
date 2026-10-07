@@ -8,6 +8,12 @@ import "@jsonschema/JsonSchema.pkl"
 import "@model/Model.pkl"
 
 /// The composed schema of a chart whose values class is `root`.
+///
+/// `$defs` holds the documents the values refer to, each by its `$id`, and the
+/// chart's own `@Def` definitions, each by its name, so that a
+/// `$ref: "#/$defs/<name>"` in the chart's values resolves. A definition used only
+/// inside a document is in that document's own `$defs`. The key is left out when
+/// there is nothing to put in it: an empty `$defs` says nothing.
 function valuesSchema(root: Model.Node): Dynamic =
   let (
     docs =
@@ -15,6 +21,13 @@ function valuesSchema(root: Model.Node): Dynamic =
         .walk(root)
         .filter((n) -> n.schema != null)
         .distinctBy((n) -> n.schema.id)
+  )
+  let (
+    defs =
+      Model
+        .walkOwn(root)
+        .filter((n) -> n.def != null)
+        .distinctBy((n) -> n.def.name)
   )
     new Dynamic {
       ["$schema"] = JsonSchema.schemaUri
@@ -24,9 +37,14 @@ function valuesSchema(root: Model.Node): Dynamic =
       when (!JsonSchema.conditions(root.cls).isEmpty) {
         allOf = JsonSchema.conditions(root.cls)
       }
-      ["$defs"] = new Dynamic {
-        for (d in docs) {
-          [d.schema.id] = JsonSchema.documentIn(d, false)
+      when (!docs.isEmpty || !defs.isEmpty) {
+        ["$defs"] = new Dynamic {
+          for (d in docs) {
+            [d.schema.id] = JsonSchema.documentIn(d, false)
+          }
+          for (d in defs) {
+            [d.def.name] = JsonSchema.definition(d)
+          }
         }
       }
     }
@@ -72,7 +90,7 @@ local function rows(prefix: String, p: Model.Prop, within: Boolean): List<Row> =
     else
       List(new Row {
         path = dotted
-        type = Model.typeLabel(t)
+        type = Model.typeLabel(t) + (if (p.nullable) " | null" else "")
         default = if (p.hasDefault) "`\(Model.literal(p.default).replaceAll("|", "\\|"))`" else ""
         required = within && p.required
         setAtInstall = p.setAtInstall

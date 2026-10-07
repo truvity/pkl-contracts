@@ -1,0 +1,15 @@
+/// The `defs` chart's default values, checked against its contract when evaluated.
+amends "DefsChart.pkl"
+
+owner { name = "platform" }
+
+config { probes { address = ":7070" } }
+
+images {
+  defs {
+    registry = "registry.example.com"
+    repository = "example/defs"
+    tag = ""
+    digest = ""
+  }
+}
