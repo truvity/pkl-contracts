@@ -1,0 +1,348 @@
+/// The decided vocabulary, value by value: what each type admits and what it
+/// refuses, including the cases the generated probes (`ProbesTest.pkl`) do not
+/// build from an annotation's examples: a line break after a value, a value at
+/// the edge of its length, a compound duration, the earlier name of a type that
+/// was widened, the rules a PostgreSQL URL must not break.
+amends "pkl:test"
+
+import "pkl:reflect"
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+local function show(v: String): String = v.replaceAll("\n", "\\n")
+
+local long = "a".repeat(63)
+local pg = "postgres://app@db.ns:5432/app"
+
+local upstreamKeys: List<String> =
+  (reflect.Module(V).typeAliases["UpstreamSecretKey"].referent as reflect.UnionType).members.map((m) ->
+    (m as reflect.StringLiteralType).value
+  )
+
+local notPatterns =
+  reflect.Module(V).typeAliases["PostgresUrl"].annotations.filterIsInstance(A.NotPattern)
+
+facts {
+  // ------------------------------------------------------------ durations
+  for (v in List("24h0m0s", "1.5s", "5m0s", "1h30m", "0s", "100ms", "10s", "500ms")) {
+    ["Duration valid: \(v)"] { v is V.Duration }
+  }
+  for (v in List("1d", "-1s", "0", ".5s", "5.s", "", "PT12H", "5", "1 s", "1s\n")) {
+    ["Duration invalid: \(show(v))"] { !(v is V.Duration) }
+  }
+  // GoDuration is the earlier name: everything it admitted is still admitted, and
+  // it admits what Duration does.
+  for (v in List("10s", "500ms", "0s", "10ns", "10us", "10µs", "2h", "1h30m", "1.5s")) {
+    ["GoDuration valid: \(v)"] { v is V.GoDuration }
+  }
+  for (v in List("10", "10 s", "s", "10d", "", "1s\n")) {
+    ["GoDuration invalid: \(show(v))"] { !(v is V.GoDuration) }
+  }
+  for (v in List("1d", "90s", "15m", "2w", "1y", "500ms", "1h30m", "1d12h")) {
+    ["PromDuration valid: \(v)"] { v is V.PromDuration }
+  }
+  for (v in List("", "1.5m", "5", "-1s", "1M", "1s\n")) {
+    ["PromDuration invalid: \(show(v))"] { !(v is V.PromDuration) }
+  }
+  for (v in List("30s", "1h30m", "500ms", "1h2m3s4ms", "99999h")) {
+    ["GatewayDuration valid: \(v)"] { v is V.GatewayDuration }
+  }
+  for (v in List("", "1.5s", "1d", "100000s", "1h2m3s4ms5h", "1s\n")) {
+    ["GatewayDuration invalid: \(show(v))"] { !(v is V.GatewayDuration) }
+  }
+  // The known limit of the pattern: the order of units and a repeated unit pass.
+  ["GatewayDuration does not judge the order of units"] { "1s1h" is V.GatewayDuration }
+  for (v in List("720h", "30s", "1h30m")) {
+    ["KarpenterDuration valid: \(v)"] { v is V.KarpenterDuration }
+  }
+  for (v in List("", "Never", "1.5h", "1d", "500ms", "1h\n")) {
+    ["KarpenterDuration invalid: \(show(v))"] { !(v is V.KarpenterDuration) }
+  }
+  for (v in List("5m0s", "1h0m0s", "30s")) {
+    ["KargoDuration valid: \(v)"] { v is V.KargoDuration }
+  }
+  for (v in List("", "1d", "5", "-5m", "PT5M")) {
+    ["KargoDuration invalid: \(v)"] { !(v is V.KargoDuration) }
+  }
+  for (v in List("30d", "12M", "1y", "2w", "720h")) {
+    ["Retention valid: \(v)"] { v is V.Retention }
+  }
+  for (v in List("", "30", "5m", "1.5d", "1s", "30d\n")) {
+    ["Retention invalid: \(show(v))"] { !(v is V.Retention) }
+  }
+
+  // ------------------------------------------------------- numbers and sizes
+  for (v in List(1, 30, 86400)) {
+    ["Seconds valid: \(v)"] { v is V.Seconds }
+    ["Days valid: \(v)"] { v is V.Days }
+  }
+  for (v in List(0, -1, 1.5)) {
+    ["Seconds invalid: \(v)"] { !(v is V.Seconds) }
+    ["Days invalid: \(v)"] { !(v is V.Days) }
+  }
+  for (v in List(0, 0.5, 1, 0.0, 1.0)) { ["Ratio valid: \(v)"] { v is V.Ratio } }
+  for (v in List(-0.1, 1.1, 2)) { ["Ratio invalid: \(v)"] { !(v is V.Ratio) } }
+  for (v in List(0.001, 0.5, 0.999)) { ["OpenRatio valid: \(v)"] { v is V.OpenRatio } }
+  for (v in List(0, 1, 0.0, 1.0, -0.5, 1.5)) { ["OpenRatio invalid: \(v)"] { !(v is V.OpenRatio) } }
+  // Bytes: Kubernetes' SI kilo is a lower-case k.
+  for (v in List("128Mi", "1024", "5G", "5k", "1Ti")) { ["Bytes valid: \(v)"] { v is V.Bytes } }
+  for (v in List("5K", "-1", "1.5Gi", "Mi", "10mb", "")) {
+    ["Bytes invalid: \(v)"] { !(v is V.Bytes) }
+  }
+
+  // ------------------------------------------------------------------ names
+  for (v in List("a", "kube-system", "a1-b2", "0", long)) {
+    ["DnsLabel valid: \(v)"] { v is V.DnsLabel }
+  }
+  for (v in List("", "-a", "a-", "A", "a_b", "a.b", "a b", long + "a", "a\n")) {
+    ["DnsLabel invalid: \(show(v))"] { !(v is V.DnsLabel) }
+  }
+  for (v in List("a", "a.b.c", "my-secret", long + "." + long)) {
+    ["DnsSubdomain valid: \(v.take(20))"] { v is V.DnsSubdomain }
+  }
+  for (
+    v in
+      List(
+        "",
+        "-a",
+        "a-",
+        "a..b",
+        ".a",
+        "a.",
+        "a.-b",
+        "A.b",
+        "a_b",
+        long + "a.b",
+        List(long, long, long, long, long).join("."),
+        "a\n",
+      )
+  ) {
+    ["DnsSubdomain invalid: \(v.length) chars: \(show(v.take(20)))"] { !(v is V.DnsSubdomain) }
+  }
+  // DnsName no longer admits the empty string; its other forms are as before.
+  for (v in List("a", "a-b.c", "a.b")) { ["DnsName valid: \(v)"] { v is V.DnsName } }
+  for (v in List("", "-a", "A", "a_b", "a\n")) {
+    ["DnsName invalid: \(show(v))"] { !(v is V.DnsName) }
+  }
+  for (v in List("ab", "my-project", "my-project-2", "a23456789012345678901234567890b2")) {
+    ["ProjectName valid: \(v)"] { v is V.ProjectName }
+  }
+  for (
+    v in
+      List(
+        "",
+        "a",
+        "1a",
+        "-ab",
+        "ab-",
+        "Ab",
+        "a_b",
+        "a.b",
+        "a2345678901234567890123456789012b",
+        "ab\n",
+      )
+  ) {
+    ["ProjectName invalid: \(show(v))"] { !(v is V.ProjectName) }
+  }
+  for (v in List("a", "my-install", "a".repeat(40))) {
+    ["InstallName valid: \(v)"] { v is V.InstallName }
+  }
+  for (v in List("", "-a", "a.b", "a".repeat(41))) {
+    ["InstallName invalid: \(v.take(20))"] { !(v is V.InstallName) }
+  }
+
+  // -------------------------------------------------------------------- URLs
+  for (v in List("https://example.com", "https://a.b:8443/p?q=1#f")) {
+    ["HttpsUrl valid: \(v)"] { v is V.HttpsUrl }
+  }
+  for (
+    v in
+      List(
+        "http://example.com",
+        "https://",
+        "example.com",
+        "https://a b",
+        "https:///p",
+        "",
+        "https://a\n",
+      )
+  ) {
+    ["HttpsUrl invalid: \(show(v))"] { !(v is V.HttpsUrl) }
+  }
+  for (v in List("http://svc.ns:8080/x", "https://example.com")) {
+    ["HttpUrl valid: \(v)"] { v is V.HttpUrl }
+  }
+  for (v in List("ftp://example.com", "http://", "svc:8080", "http://a b", "")) {
+    ["HttpUrl invalid: \(v)"] { !(v is V.HttpUrl) }
+  }
+  for (v in List("nats://nats.nats:4222", "tls://nats.example:4222")) {
+    ["NatsUrl valid: \(v)"] { v is V.NatsUrl }
+  }
+  for (v in List("http://nats:4222", "nats://", "nats:4222", "nats://a b", "")) {
+    ["NatsUrl invalid: \(v)"] { !(v is V.NatsUrl) }
+  }
+  for (v in List("oci://registry.example/charts", "oci://registry.example:5000/a/b:1.0")) {
+    ["OciUrl valid: \(v)"] { v is V.OciUrl }
+  }
+  for (v in List("https://registry.example/x", "oci://", "registry.example/x", "oci://a b", "")) {
+    ["OciUrl invalid: \(v)"] { !(v is V.OciUrl) }
+  }
+  for (
+    v in
+      List(
+        pg,
+        "postgresql://h/db",
+        "postgres://h/db?application_name=x",
+        "postgres://user@h/db?connect_timeout=5",
+      )
+  ) {
+    ["PostgresUrl valid: \(v)"] { v is V.PostgresUrl }
+  }
+  for (
+    v in
+      List(
+        "mysql://h/db",
+        "h/db",
+        "postgres://",
+        "postgres://h/d b",
+        "",
+        "postgres://u:p@h/db",
+        "postgresql://u:p@h:5432/db",
+        "postgres://:p@h/db",
+        "postgres://h/db?password=x",
+        "postgres://h/db?a=b&password=x",
+        "postgres://h/db?pass%77ord=x",
+        "postgres://h/db?%70assword=x",
+        "postgres://h/db?%70ass%77ord=x",
+        "postgres://h/db?sslpassword=x",
+        "postgres://h/db?%73slpassword=x",
+        "postgres://h/db?passfile=/x",
+        "postgres://h/db?sslmode=require",
+        "postgres://h/db?x=1&sslmode=disable",
+        "postgres://h/db?sslrootcert=/ca",
+        "postgres://h/db?sslcert=/c",
+        "postgres://h/db?sslkey=/k",
+        "postgres://h/db\n",
+      )
+  ) {
+    ["PostgresUrl invalid: \(show(v))"] { !(v is V.PostgresUrl) }
+  }
+  ["a name that merely contains password is fine"] {
+    "postgres://h/db?mypassword_hint=x" is V.PostgresUrl
+  }
+  ["a password-like path is fine"] { "postgres://h/password=x" is V.PostgresUrl }
+  // The annotations carry the same rules as data, and each of their own examples
+  // is refused by the alias.
+  ["PostgresUrl carries five NotPattern annotations"] { notPatterns.length == 5 }
+  for (i, n in notPatterns) {
+    ["NotPattern \(i) (\(n.reason)): its regex matches each invalid example"] {
+      n.invalid.toList().every((v) -> v.contains(Regex(n.regex)))
+    }
+    ["NotPattern \(i): each invalid example is refused by PostgresUrl"] {
+      n.invalid.toList().every((v) -> !(v is V.PostgresUrl))
+    }
+  }
+
+  // ----------------------------------------------------------------- secrets
+  for (v in List("password", "api-key", "a1", "token-2")) {
+    ["SecretKey valid: \(v)"] { v is V.SecretKey }
+  }
+  for (
+    v in List("", "-a", "a-", "Api-Key", "api_key", "tls.key", "AWS_ACCESS_KEY_ID", "a b", "a\n")
+  ) {
+    ["SecretKey invalid: \(show(v))"] { !(v is V.SecretKey) }
+  }
+  for (
+    v in
+      List(
+        "github_app_id",
+        "AWS_ACCESS_KEY_ID",
+        "tls.key",
+        "tls.crt",
+        "ca.crt",
+        ".dockerconfigjson",
+      )
+  ) {
+    ["UpstreamSecretKey valid: \(v)"] { v is V.UpstreamSecretKey }
+  }
+  for (v in List("", "password", "tls_key", "github_app_x", "TLS.KEY")) {
+    ["UpstreamSecretKey invalid: \(v)"] { !(v is V.UpstreamSecretKey) }
+  }
+  for (v in List("password", "db/password", "tls/server.crt", "_x/a.b-c", "a..b")) {
+    ["SecretName valid: \(v)"] { v is V.SecretName }
+  }
+  for (
+    v in List("", "/a", "a/", "a//b", ".", "..", "a/./b", "a/../b", ".hidden", "a b", "a\\b", "a\n")
+  ) {
+    ["SecretName invalid: \(show(v))"] { !(v is V.SecretName) }
+  }
+  // SecretRefKey is the union SecretKey | UpstreamSecretKey as one type: every
+  // member of the closed list is admitted, and so is every kebab-case key.
+  for (m in upstreamKeys) { ["SecretRefKey admits the upstream key \(m)"] { m is V.SecretRefKey } }
+  ["the closed list of upstream keys has ten members"] { upstreamKeys.length == 10 }
+  for (v in List("password", "api-key", "a1", "token-2")) {
+    ["SecretRefKey valid: \(v)"] { v is V.SecretRefKey }
+  }
+  for (v in List("", "-a", "Api-Key", "api_key", "tls_key", "a b", "a\n")) {
+    ["SecretRefKey invalid: \(show(v))"] { !(v is V.SecretRefKey) }
+  }
+  ["Reload file"] { "file" is V.Reload }
+  ["Reload restart"] { "restart" is V.Reload }
+  for (v in List("", "reload", "File", "signal")) { ["Reload invalid: \(v)"] { !(v is V.Reload) } }
+  ["SecretRef kebab key"] {
+    new V.SecretRef { secretName = "db-creds"; key = "password" }.key == "password"
+  }
+  ["SecretRef upstream key"] {
+    new V.SecretRef { secretName = "tls"; key = "tls.key" }.key == "tls.key"
+  }
+  ["SecretRef secretName may be dotted"] {
+    new V.SecretRef { secretName = "a.b"; key = "k" }.secretName == "a.b"
+  }
+  ["SecretRef refuses an empty secretName"] {
+    module
+      .catch(() -> new V.SecretRef { secretName = ""; key = "k" }.secretName)
+      .contains("violated")
+  }
+  ["SecretRef refuses an upper-case secretName"] {
+    module
+      .catch(() -> new V.SecretRef { secretName = "Db"; key = "k" }.secretName)
+      .contains("violated")
+  }
+  ["SecretRef refuses a snake_case key"] {
+    module.catch(() -> new V.SecretRef { secretName = "s"; key = "api_key" }.key).length > 0
+  }
+  ["SecretRef refuses an empty key"] {
+    module.catch(() -> new V.SecretRef { secretName = "s"; key = "" }.key).length > 0
+  }
+
+  // ------------------------------------------------------------- API version
+  for (v in List("access.truvity.github.io/Roster/v1", "my-product.truvity.github.io/Policy/v12")) {
+    ["ApiVersion valid: \(v)"] { v is V.ApiVersion }
+  }
+  for (
+    v in
+      List(
+        "",
+        "access.truvity.github.io/Roster",
+        "access.truvity.github.io/Roster/v0",
+        "access.truvity.github.io/Roster/v01",
+        "access.truvity.github.io/Roster/1",
+        "access.example.io/Roster/v1",
+        "Access.truvity.github.io/Roster/v1",
+        "truvity.github.io/Roster/v1",
+        "access.truvity.github.io//v1",
+        "access.truvity.github.io/Roster/v1\n",
+      )
+  ) {
+    ["ApiVersion invalid: \(show(v))"] { !(v is V.ApiVersion) }
+  }
+
+  // The transport mode keeps its three members.
+  for (v in List("off", "permissive", "strict")) { ["TlsMode valid: \(v)"] { v is V.TlsMode } }
+  for (v in List("", "on", "require", "Strict")) { ["TlsMode invalid: \(v)"] { !(v is V.TlsMode) } }
+
+  // ------------------------------------------------------------ open objects
+  ["NonEmptyObject admits an object with a key"] { new Dynamic { a = 1 } is V.NonEmptyObject }
+  ["NonEmptyObject refuses an empty object"] { !(new Dynamic {} is V.NonEmptyObject) }
+}

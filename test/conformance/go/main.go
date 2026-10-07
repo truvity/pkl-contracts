@@ -26,6 +26,7 @@ import (
 	yaml "go.yaml.in/yaml/v3"
 
 	"conformance.invalid/gen/blocks"
+	"conformance.invalid/gen/collections"
 	"conformance.invalid/gen/conditions"
 	"conformance.invalid/gen/installed"
 	"conformance.invalid/gen/literals"
@@ -68,6 +69,7 @@ var structs = map[string]func() any{
 	"shortener":  func() any { return &shortener.ShortenerImpl{} },
 	"installed":  func() any { return &installed.InstalledImpl{} },
 	"blocks":     func() any { return &blocks.Blocks{} },
+	"collections": func() any { return &collections.Collections{} },
 	"conditions": func() any { return &conditions.Conditions{} },
 	"names":      func() any { return &names.Names{} },
 	"literals":   func() any { return &literals.Literals{} },

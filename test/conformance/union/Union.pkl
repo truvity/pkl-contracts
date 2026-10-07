@@ -16,3 +16,33 @@ sizes: (Listing<Int> | Number)?
 
 /// A string, or a map of strings.
 labels: (Mapping<String, String> | String)?
+
+/// A list of names, each either a bare name or an object that carries labels: a
+/// string and a block in one position, which JSON Schema says as `anyOf` (the
+/// members cannot overlap, so `oneOf` would accept the same documents).
+namespaces: Listing<V.NonEmptyString | Namespace>?
+
+/// Two closed classes with nothing required: the empty object conforms to both
+/// members, which `anyOf` accepts as Pkl does, and `oneOf` would refuse.
+either: (First | Second)?
+
+/// A namespace with labels.
+class Namespace {
+  /// The namespace's name.
+  name: V.NonEmptyString
+
+  /// Labels to put on it.
+  labels: Mapping<String, String>?
+}
+
+/// One shape of `either`.
+class First {
+  /// A number only this shape has.
+  a: Int?
+}
+
+/// The other shape of `either`.
+class Second {
+  /// A number only this shape has.
+  b: Int?
+}

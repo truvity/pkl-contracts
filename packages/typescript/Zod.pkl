@@ -22,7 +22,17 @@
 ///     `superRefine`, which reads a dotted path through `at` (absent on the way
 ///     is absent) and reports each missing path at that path;
 ///   - `@DenyKeys` is a `refine` that refuses an own key on the list;
-///   - an exclusive bound is `.gt()` or `.lt()`.
+///   - an exclusive bound is `.gt()` or `.lt()`;
+///   - `@Items` is `.min()` and `.max()` on the array, and `uniqueItems` a
+///     `refine` that compares the items as JSON with the keys of an object in
+///     order (`distinct`), so that two objects that differ only in the order of
+///     their keys are one item, as JSON Schema has it;
+///   - `@Properties` is a `refine` that counts the own keys (`sized`): zod has no
+///     bound on the size of a record or an object;
+///   - `@NotPattern` is a `refine` that refuses a match, with the rule's reason as
+///     its message;
+///   - a union is `z.union`, which, like JSON Schema's `anyOf`, accepts a value
+///     that is any member (see `JsonSchema`).
 ///
 /// Every class and alias is exported twice, as the schema and as the type
 /// (`z.infer`), under one name. A reference between classes is lazy, so the
@@ -85,6 +95,33 @@ local function range(n: Model.Node): String =
     + (if (n.range?.exclusiveMin != null) ".gt(\(n.range.exclusiveMin))" else "")
     + (if (n.range?.exclusiveMax != null) ".lt(\(n.range.exclusiveMax))" else "")
 
+/// `.min()`, `.max()` and the uniqueness refinement of an array's `@Items`, or
+/// nothing.
+local function itemBounds(n: Model.Node): String =
+  (if (n.itemBounds?.min != null) ".min(\(n.itemBounds.min))" else "")
+    + (if (n.itemBounds?.max != null) ".max(\(n.itemBounds.max))" else "")
+    + (
+      if (n.itemBounds?.unique == true)
+        ".refine(distinct, { message: \"items must be distinct\" })"
+      else
+        ""
+    )
+
+/// A refinement for the number of entries `@Properties` bounds, or nothing.
+local function propertyBounds(n: Model.Node): String =
+  (
+    if (n.propertyBounds?.min != null)
+      ".refine((o) => sized(o) >= \(n.propertyBounds.min), { message: \(lit("must have at least \(n.propertyBounds.min) \(if (n.propertyBounds.min == 1) "entry" else "entries")")) })"
+    else
+      ""
+  )
+    + (
+      if (n.propertyBounds?.max != null)
+        ".refine((o) => sized(o) <= \(n.propertyBounds.max), { message: \(lit("must have at most \(n.propertyBounds.max) \(if (n.propertyBounds.max == 1) "entry" else "entries")")) })"
+      else
+        ""
+    )
+
 /// A refinement that refuses the keys `@DenyKeys` lists, or nothing.
 local function denied(n: Model.Node): String =
   if (n.denyKeys == null)
@@ -107,6 +144,9 @@ local function inner(n: Model.Node): String =
       + (if (n.length?.min != null) ".min(\(n.length.min))" else "")
       + (if (n.length?.max != null) ".max(\(n.length.max))" else "")
       + (if (n.pattern != null) ".regex(\(regex(n.pattern.regex))).refine(noLineBreak)" else "")
+      + n.notPatterns
+        .map((p) -> ".refine((s) => !\(regex(p.regex)).test(s), { message: \(lit(p.reason)) })")
+        .join("")
   else if (n.kind == "integer")
     "z.number().int()" + range(n)
   else if (n.kind == "number")
@@ -116,11 +156,12 @@ local function inner(n: Model.Node): String =
   else if (n.kind == "enum")
     "z.enum([\(n.values.map((v) -> lit(v)).join(", "))])"
   else if (n.kind == "list")
-    "z.array(\(expr(n.items)))"
+    "z.array(\(expr(n.items)))" + itemBounds(n)
   else if (n.kind == "map")
     // zod 4 reads a record keyed by an enum as exhaustive (every member needed),
     // which a map is not: a partial record names the members it may have.
     "z.\(if (n.key.kind == "enum") "partialRecord" else "record")(\(expr(n.key)), \(expr(n.items)))"
+      + propertyBounds(n)
       + denied(n)
   else if (n.kind == "open")
     "z.looseObject({})"
@@ -130,6 +171,7 @@ local function inner(n: Model.Node): String =
         else
           ".refine((o) => [\(n.requiresKeys.keys.toList().map((k) -> lit(k)).join(", "))].every((k) => k in o))"
       )
+      + propertyBounds(n)
       + denied(n)
   else if (n.kind == "union")
     "z.union([\(n.members.map((m) -> expr(m)).join(", "))])"
@@ -206,6 +248,21 @@ local header: String =
   import { z } from "zod";
 
   const noLineBreak = (s: string): boolean => !/[\\n\\r\\f\\v\\u0085\\u2028\\u2029]/.test(s);
+
+  // The number of own keys of an object or a record.
+  const sized = (o: object): number => Object.keys(o).length;
+
+  // JSON with the keys of every object in order, so that two values that differ
+  // only in the order of an object's keys are one value (JSON Schema's equality).
+  const canon = (v: unknown): string =>
+    JSON.stringify(v, (_k, x) =>
+      x !== null && typeof x === "object" && !Array.isArray(x)
+        ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+        : x,
+    );
+
+  // Whether no two items are equal.
+  const distinct = (a: unknown[]): boolean => new Set(a.map(canon)).size === a.length;
 
   // The value at a path through blocks; absent on the way is absent.
   const at = (o: unknown, path: string[]): unknown => {

@@ -127,6 +127,85 @@ in zod and pydantic. JSON Schema says `propertyNames: { not: { enum: [...] } }`
 pattern or an enum), zod a `refine` on the record, pydantic an `AfterValidator`, Pkl
 `Check`. Keys are compared as written: a key is denied by its exact name.
 
+## A count on a list or a map: `@A.Items` and `@A.Properties`
+
+A `Listing` or `List` that must not be empty, or has a most, or holds no item
+twice, takes `@A.Items` on the property; a `Mapping` or an open object whose number
+of entries is bounded takes `@A.Properties`:
+
+```pkl
+/// The actions a policy may take, at least one, no action twice.
+@A.Items { min = 1; unique = true }
+actions: Listing<V.LogLevel>
+
+/// Labels, at least one.
+@A.Properties { min = 1 }
+labels: Mapping<String, V.NonEmptyString>
+```
+
+They are written as annotations, and not as a constraint on the type
+(`Listing<String>(length >= 1)`), because `pkl:reflect` erases a constraint: a
+generator would see a plain list and drop the bound without a word. On an alias
+they are the alias's own (the vocabulary's `NonEmptyObject` is `@A.Properties
+{ min = 1 }`, which is how the items of a list can be required to be non-empty
+objects); on a property they narrow the type it has (the larger least, the smaller
+greatest, a set stays a set, and a bound that leaves no count is refused when the
+contract is reflected). The bound applies to the list itself; the items of a list
+get theirs from their own type.
+
+Items are distinct (`unique = true`) when their JSON values are equal, whatever the
+order of an object's keys. The numbers `1` and `1.0` are the same value; Pkl would
+tell them apart, so a list of floats that holds both is a duplicate to a JSON
+Schema validator and to zod, and not to Pkl's own `Check`.
+
+| Rule | Pkl | JSON Schema | zod | pydantic | Docs |
+|---|---|---|---|---|---|
+| `Items.min`, `Items.max` | `Check` | `minItems`, `maxItems` | `.min()`, `.max()` | `Field(min_length, max_length)` | "at least N items" |
+| `Items.unique` | `Check` | `uniqueItems` | `refine(distinct)`, keys sorted | `AfterValidator(_distinct)`, keys sorted | "items are distinct" |
+| `Properties.min`, `.max` | `Check` | `minProperties`, `maxProperties` | `refine` on the number of own keys | `Field(min_length, max_length)` on the `dict` | "at least N properties" |
+
+What a target cannot say is said here and not dropped silently: a zod type
+(`z.infer`) and a TypeScript, Go or Kotlin type are shapes, so none carries a
+count or distinctness (zod's validation does; `z.record` and `z.object` have no
+size bound of their own, which is why that is a `refine`); the Go and Kotlin
+types are the official generators' and validate nothing at all.
+
+*Checked by:* the probes (the count at, under and over each bound, duplicates, the
+same object with its keys in another order), `test/VocabTest.pkl`, the
+`collections` and `union` fixtures of the conformance suite, and
+`test/GeneratorsTest.pkl`.
+
+## A string that must not contain something: `@A.NotPattern`
+
+`@A.Pattern` says what a value looks like. `@A.NotPattern { regex; reason; invalid }`
+says what it must never contain, with the reason a person is told: a password in a
+connection URL, a TLS parameter that belongs to another setting. An alias carries one
+for each rule, beside its `@A.Pattern`, and the Pkl constraint reads the same
+expressions from one `local const` list, so the lambda and the annotations cannot
+disagree (the probes try each `invalid` example). JSON Schema says `not: { pattern
+}` for each, under `allOf` (the schema's own `not` is the line-break guard);
+zod a `refine`; pydantic an `AfterValidator` with Python's `re`, where `pattern` is
+pydantic's own engine, so the expressions are written in the subset both read. The
+semantics are a search, like every pattern.
+
+## A union is `anyOf`
+
+A union of types (`V.NonEmptyString | Entry`, `Listing<X> | X`) is `anyOf` in JSON
+Schema, `z.union` in zod and `X | Y` in pydantic, and never `oneOf`. Pkl accepts a
+value that conforms to ANY member, and so must the schema. `oneOf` also refuses a
+value that conforms to two members. Where the members cannot overlap (a string and
+an object, a list and a scalar, objects with a different required key) the two
+keywords accept the same documents, and a hand-written schema that says `oneOf`
+there is matched, document for document, by the generated `anyOf`. Where they can
+(two closed classes whose properties are all optional both admit `{}`) `oneOf`
+would refuse what Pkl accepts, so it is not generated. A union of plain scalars is
+`type: [...]`. Kotlin's generator refuses a union of a string type and string
+literals, so the vocabulary spells such a type as one string alias
+(`SecretRefKey`).
+
+*Checked by:* `fixtures/union` (a name or a block, the empty object against two
+closed classes, a document that is neither), `test/GeneratorsTest.pkl`.
+
 ## A rule across fields: `@A.RequiredWhen` and `@A.RequiredUnless`
 
 "When the install only renders rules, nothing else is needed" is a rule across
@@ -192,22 +271,51 @@ paths, fixtures under `fixtures/conditions`).
 
 ## The vocabulary's newer types
 
-- `PromDuration`: a Prometheus duration, whole seconds, minutes or hours
-  (`^[0-9]+(s|m|h)$`). `GoDuration` is wrong for a field a Prometheus rule reads: it
-  admits `ns`, `us` and `ms`. There is **no empty variant**: every vocabulary type
+- **Durations.** Each system that reads a duration has its own grammar, so each
+  grammar is its own type, written as a string (Pkl's `Duration` renders as an object
+  that no other language reads), and a field takes the type of the system that reads
+  it. `Duration`: Go's `time.ParseDuration` subset (one or more `<number><unit>`
+  parts, the number whole or `d.d`, the units `ns us µs μs ms s m h`; no sign, no
+  bare `0`, no `.5s`). `GoDuration` is the earlier, narrower name, now a deprecated
+  alias of it. `PromDuration`: `ms s m h d w y`, compound (`1h30m`, `1d`). `GatewayDuration`: GEP-2257,
+  `^([0-9]{1,5}(h|m|s|ms)){1,4}$` (the order of units and a repeated unit are left to
+  the API server). `KarpenterDuration`: `h m s`, compound; Karpenter's literal
+  `Never` is a union the field declares itself. `KargoDuration`: Go's grammar.
+  `Retention`: `30d`, `12M` (capital `M` is months; a lower-case `m` is minutes and
+  is refused). There is **no empty variant** of any of them: every vocabulary type
   refuses `""` (a value that may be left out is absent, `PromDuration?`), and a
   consumer that reads an empty string as "none" must read an absent key the same,
-  which is the rule of set-at-install blocks and of `Quantity?`. A field that
-  meant "empty is none" becomes `PromDuration?` and loses its `""` default.
-- `DnsLabel`: an RFC 1123 label (`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, at most 63
-  characters), the shape of a namespace. Never empty and never dotted (`DnsName` is
-  the dotted one, empty allowed). A namespace or a cluster name that may be left out
-  is `DnsLabel?`, absent rather than `""`. Write the `?` on the property: an alias
-  that is nullable is read as required (the same trap as `X | Y?`).
-- `StatusCodeList`: status code names joined by a bar, `INTERNAL|UNAVAILABLE`
-  (`^[A-Z_]+(\|[A-Z_]+)*$`). It says nothing of which codes exist.
-- `GatewayTlsMode`: `"off" | "permissive"`, a gateway listener's mutual TLS. Not
-  `TlsMode`: a gateway has no `strict`, so the value is not spellable.
+  which is the rule of set-at-install blocks and of `Quantity?`.
+- **Integers that mirror an upstream field.** `Seconds`, `Days`: at least one.
+  Use them only where the upstream field is an integer named `...Seconds` or
+  `...Days`; a field of our own takes a duration string. `OpenRatio` is a number
+  strictly between zero and one; `Ratio` is zero to one, both included.
+- **Names.** `DnsLabel`: an RFC 1123 label, at most 63 characters, never empty and
+  never dotted. `DnsSubdomain`: dot-separated labels, at most 253 characters,
+  never empty (`DnsName` is the looser, also non-empty since v0.5.0). `ProjectName`:
+  2 to 32 characters, starts with a letter. `InstallName`: a `DnsLabel` of at most
+  40, which leaves room for the suffixes a chart appends. A name that may be left
+  out is `DnsLabel?`, absent rather than `""`; write the `?` on the property (an
+  alias that is nullable is read as required, the same trap as `X | Y?`).
+- **URLs by scheme.** `HttpsUrl`, `HttpUrl`, `NatsUrl` (`nats://` or `tls://`),
+  `OciUrl` (`oci://` and a registry host). Each refuses white space and line
+  breaks and needs a host; none is an RFC 3986 parser. `PostgresUrl` needs a host
+  and carries no credential and no TLS setting (`NotPattern`, above).
+- **Secrets: where they live, never the value.** `SecretRef` is the class
+  `{ secretName: DnsSubdomain, key: SecretRefKey }`. A key is kebab-case
+  (`SecretKey`, at most 253) or one an upstream fixes (`UpstreamSecretKey`: `tls.key`,
+  `tls.crt`, `ca.crt`, `.dockerconfigjson`, the keys a runner controller's GitHub
+  App secret reads, the AWS SDK's environment names): a closed list, where a new
+  entry is a reviewed change that names the upstream that dictates it. `SecretRefKey`
+  is the two as one type; `test/VocabTest.pkl` checks that it admits every
+  member of the list. `SecretName` is a relative path of segments joined by `/`
+  (`db/password`), none empty, `.` or `..`. `Reload` is `"file" | "restart"`.
+- **`ApiVersion`**: `<product>.truvity.github.io/<kind>/v<N>`, N from 1 without a
+  leading zero.
+- **Earlier additions.** `StatusCodeList`: status code names joined by a bar,
+  `INTERNAL|UNAVAILABLE`. `GatewayTlsMode`: `"off" | "permissive"`, a gateway
+  listener's mutual TLS; not `TlsMode`, which keeps `strict`. `NonEmptyObject`: an
+  open object with at least one key.
 
 ## Set at install
 
@@ -298,7 +406,8 @@ repository's modules.
 `X | Y?` is `X | (Y?)`: the `?` binds to the last member alone. Reflection sees a
 union with a nullable member, not a nullable union, and a field written that way
 is **required** in every generated artifact while Pkl accepts `null` for it.
-Write `(X | Y)?`.
+Write `(X | Y)?`. A union inside type arguments, `Listing<X | Y>?`, is fine: the
+`?` there binds to the whole `Listing`.
 
 *Checked by:* `hack/lint.sh` on the source, and the model, which refuses the
 property or alias when it reflects it.
@@ -430,7 +539,9 @@ and `hack/codegen.sh kotlin ...` (versions and a digest pinned there). Their typ
 are shapes: none of the contract's constraints survives into a Go struct or a
 Kotlin class, so a service validates against the generated JSON Schema, and the
 type says only what the fields are. Kotlin cannot generate a module with a union
-type (`Int | String`), which is why the platform block has no Kotlin class.
+type (`Int | String`, or a string type and string literals), which is why the
+platform block has no Kotlin class, and why a class in the vocabulary (`SecretRef`)
+has no union in it.
 
 A property whose name is not an identifier (`service-lib`) keeps its key in every
 artifact. zod quotes it; pydantic declares the attribute under a name Python can
@@ -459,11 +570,27 @@ vocabulary as a package would show a generator that depends on it by path none.
 compares them with this checkout's. A change is breaking when a document valid
 before may be invalid now, or a new demand is made: a property or document
 removed, a property newly required, a narrowed type, enum, range or length, an
-object closed that was open, a pattern added or changed (whether one regular
-expression is narrower than another is not decidable in general, so a changed
-pattern is flagged and a reviewer overrules it), an `anyOf` alternative no longer
-covered. A property added, a type or enum widened, a range relaxed and a pattern
-removed are compatible and only reported. The rules are in
+object closed that was open, items that must now be distinct, a pattern added or
+changed, an `anyOf` alternative no longer covered. A property added, a type or
+enum widened, a range relaxed and a pattern removed are compatible and only
+reported.
+
+**Known limitation: a changed pattern is breaking, whichever way it moved.** Whether
+one regular expression is narrower than another is not decidable in general, so a
+pattern that was only WIDENED (a unit added to a duration grammar) is reported
+exactly like one that was tightened, and the CHANGELOG entry that declares a break
+covers the whole report. The entry's text, not the check, then has to say which of
+the reported changes narrow what a document may hold, and which do not.
+
+**The vocabulary is probed type by type.** The worked example uses a handful of the
+vocabulary's types, so a change to any other would go unseen. `hack/vocab-probe.pkl`
+writes, from the vocabulary of each side of the comparison, a module with one
+optional property for every alias and every class (`Port: V.Port?`), and the schemas
+generated from it (`probe/vocab-probe.json`) are compared like the example's. A
+narrowed pattern, range, length, enum or count of any alias is therefore
+classified; an alias removed is a removed property; an alias added is a property
+added (compatible). The probe is generated into `examples/service/.compat/`, which
+is ignored and removed afterwards. The rules are in
 `packages/jsonschema/Compatibility.pkl` and are tested on synthetic pairs in
 `test/CompatTest.pkl`. A breaking change that is meant passes when the
 CHANGELOG's `## Unreleased` section has an entry that begins `- **Breaking`.

@@ -98,7 +98,7 @@
         },
         "holdFor": {
           "type": "string",
-          "pattern": "^[0-9]+(s|m|h)$",
+          "pattern": "^([0-9]+(ms|s|m|h|d|w|y))+$",
           "not": {
             "pattern": "[\\n\\r\\f\\x0B\\x85\u2028\u2029]"
           },

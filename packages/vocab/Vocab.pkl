@@ -83,6 +83,10 @@ typealias Percent = Int(isBetween(0, 100))
 @A.Range { min = 0; max = 1 }
 typealias Ratio = Number(isBetween(0, 1))
 
+/// A fraction strictly between zero and one: neither bound is a value.
+@A.Range { exclusiveMin = 0; exclusiveMax = 1 }
+typealias OpenRatio = Number(this > 0 && this < 1)
+
 /// A whole number of at least one.
 @A.Range { min = 1 }
 typealias PositiveInt = Int(this >= 1)
@@ -91,13 +95,28 @@ typealias PositiveInt = Int(this >= 1)
 @A.Range { min = 0 }
 typealias NonNegativeInt = Int(this >= 0)
 
-local const bytesRe = #"^[0-9]+(Ki|Mi|Gi|Ti|K|M|G|T)?$"#
+/// A whole number of seconds, for a field that mirrors a Kubernetes or API
+/// integer field named `...Seconds` (`terminationGracePeriodSeconds`,
+/// `timeoutSeconds`). Use it ONLY where the upstream field is an integer; a field
+/// of our own takes a duration string. At least one: an upstream field that allows
+/// zero declares its own alias.
+@A.Range { min = 1 }
+typealias Seconds = PositiveInt
 
-/// A byte quantity in Kubernetes' spelling: `128Mi`, `5G`, `1024`.
+/// A whole number of days, for a field that mirrors an API integer field named
+/// `...Days`. The same rule of use as `Seconds`. At least one.
+@A.Range { min = 1 }
+typealias Days = PositiveInt
+
+local const bytesRe = #"^[0-9]+(Ki|Mi|Gi|Ti|k|M|G|T)?$"#
+
+/// A byte quantity in Kubernetes' spelling: `128Mi`, `5G`, `5k`, `1024`. The SI
+/// kilo is lower-case `k`, as Kubernetes spells it; an upper-case `K` is not a
+/// suffix there (and was admitted here before v0.5.0).
 @A.Pattern {
   regex = bytesRe
-  valid { "128Mi"; "1024"; "5G" }
-  invalid { "-1"; "1.5Gi"; "Mi"; "10mb" }
+  valid { "128Mi"; "1024"; "5G"; "5k" }
+  invalid { "-1"; "1.5Gi"; "Mi"; "10mb"; "5K" }
 }
 typealias Bytes = String(search(this, bytesRe))
 
@@ -125,31 +144,92 @@ local const bufferLimitRe = #"^[0-9]+(Ki|Mi|Gi|k|M|G)?$"#
 }
 typealias BufferLimit = String(search(this, bufferLimitRe))
 
-local const durationRe = #"^[0-9]+(ns|us|µs|ms|s|m|h)$"#
+local const goDurationRe = #"^([0-9]+(\.[0-9]+)?(ns|us|µs|μs|ms|s|m|h))+$"#
 
-/// A duration in Go's spelling, as a string: `10s`, `500ms`. Pkl's own
-/// `Duration` renders as an object, which no other language reads.
+/// A duration in Go's `time.ParseDuration` grammar, as a string, restricted to a
+/// subset: one or more `<number><unit>` parts, the number whole or with a decimal
+/// part that has digits on both sides, the units `ns`, `us`, `µs` (U+00B5), `μs`
+/// (U+03BC), `ms`, `s`, `m` and `h`: `24h0m0s`, `1h30m`, `1.5s`, `5m0s`, `500ms`.
+/// Refused: a sign (`-1s`), a bare `0` (Go accepts it, a configuration should say
+/// `0s`), `.5s` and `5.s`, a day unit (`1d`), ISO 8601 (`PT12H`) and the empty
+/// string. Pkl's own `Duration` renders as an object, which no other language
+/// reads, hence a string. Each system that reads durations has its own grammar,
+/// and a field takes the type of the system that reads it: `PromDuration`,
+/// `GatewayDuration`, `KarpenterDuration`, `KargoDuration`, `Retention`.
 @A.Pattern {
-  regex = durationRe
-  valid { "10s"; "500ms"; "0s" }
-  invalid { "10"; "1.5s"; "10 s"; "s"; "10d" }
+  regex = goDurationRe
+  valid { "24h0m0s"; "1.5s"; "5m0s"; "1h30m"; "500ms"; "0s"; "10µs" }
+  invalid { "1d"; "-1s"; "0"; ".5s"; "5.s"; ""; "PT12H"; "10"; "1 s"; "s" }
 }
-typealias GoDuration = String(search(this, durationRe))
+typealias Duration = String(search(this, goDurationRe))
 
-local const promDurationRe = #"^[0-9]+(s|m|h)$"#
+/// The earlier name of `Duration`. Before v0.5.0 it admitted one whole-number part
+/// only (`10s`, `500ms`); it now admits the whole grammar of `Duration`, of which
+/// every value it admitted before is a member.
+@Deprecated { message = "Use Duration, which this is an alias of."; replaceWith = "Duration" }
+typealias GoDuration = Duration
 
-/// A duration in Prometheus' spelling: whole seconds, minutes or hours, `90s`,
-/// `15m`, `2h`. Narrower than `GoDuration`, which also admits `ns`, `us` and
-/// `ms`, units Prometheus' `for`, `interval` and range selectors do not read.
-/// Never empty: a duration that may be left out is `PromDuration?`, absent, and
-/// not a `""` that means "none" (the rule of every vocabulary type: an optional
-/// field is absent or has a value).
+local const promDurationRe = #"^([0-9]+(ms|s|m|h|d|w|y))+$"#
+
+/// A duration in Prometheus' spelling: one or more `<whole number><unit>` parts,
+/// the units `ms`, `s`, `m`, `h`, `d`, `w` and `y`: `90s`, `15m`, `1d`, `500ms`,
+/// `1h30m`. Prometheus reads compound values. No fraction. Never empty: a duration
+/// that may be left out is `PromDuration?`, absent, and not a `""` that means
+/// "none" (the rule of every vocabulary type: an optional field is absent or has
+/// a value).
 @A.Pattern {
   regex = promDurationRe
-  valid { "90s"; "15m"; "2h"; "0s" }
-  invalid { ""; "10"; "1.5m"; "10 m"; "m"; "500ms"; "1d"; "10s5m" }
+  valid { "90s"; "15m"; "2h"; "0s"; "1d"; "2w"; "1y"; "500ms"; "1h30m"; "1d12h" }
+  invalid { ""; "10"; "1.5m"; "10 m"; "m"; "1M"; "-1s"; "1 d"; "10µs" }
 }
 typealias PromDuration = String(search(this, promDurationRe))
+
+local const gatewayDurationRe = #"^([0-9]{1,5}(h|m|s|ms)){1,4}$"#
+
+/// A Gateway API duration (GEP-2257): one to four `<one to five digits><unit>`
+/// parts, the units `h`, `m`, `s` and `ms`: `30s`, `1h30m`, `500ms`. No fraction.
+/// The pattern does not check GEP-2257's order of units or its rule of no repeated
+/// unit (`1s1h` and `1s2s` pass); the API server is the final judge there.
+@A.Pattern {
+  regex = gatewayDurationRe
+  valid { "30s"; "1h30m"; "500ms"; "1h2m3s4ms"; "0s"; "99999h" }
+  invalid { ""; "1.5s"; "1d"; "100000s"; "1h2m3s4ms5h"; "-1s"; "s"; "1 s" }
+}
+typealias GatewayDuration = String(search(this, gatewayDurationRe))
+
+local const karpenterDurationRe = #"^([0-9]+(h|m|s))+$"#
+
+/// A Karpenter duration: one or more `<whole number><unit>` parts, the units `h`,
+/// `m` and `s`: `720h`, `30s`, `1h30m`. Karpenter also takes the literal `Never`
+/// for `expireAfter` and similar; that is a wider type a field declares itself
+/// (`KarpenterDuration | "Never"`), not part of this alias.
+@A.Pattern {
+  regex = karpenterDurationRe
+  valid { "720h"; "30s"; "1h30m"; "0s" }
+  invalid { ""; "Never"; "1.5h"; "1d"; "500ms"; "-1h"; "h" }
+}
+typealias KarpenterDuration = String(search(this, karpenterDurationRe))
+
+/// A Kargo duration. Kargo (Go, `metav1.Duration`) renders and reads Go's long
+/// form, `5m0s` and `1h0m0s`: the grammar of `Duration`.
+@A.Pattern {
+  regex = goDurationRe
+  valid { "5m0s"; "1h0m0s"; "30s"; "1.5s" }
+  invalid { ""; "1d"; "5"; "-5m"; "PT5M" }
+}
+typealias KargoDuration = String(search(this, goDurationRe))
+
+local const retentionRe = #"^[0-9]+(h|d|w|M|y)$"#
+
+/// A retention period, VictoriaMetrics style: a whole number and one unit, `h`,
+/// `d`, `w`, `M` (capital: months) or `y`: `30d`, `12M`, `1y`. A lower-case `m` is
+/// NOT admitted: it would read as minutes, and months is the unit meant.
+@A.Pattern {
+  regex = retentionRe
+  valid { "30d"; "12M"; "1y"; "2w"; "720h" }
+  invalid { ""; "30"; "5m"; "1.5d"; "-1d"; "1s"; "30 d" }
+}
+typealias Retention = String(search(this, retentionRe))
 
 // ------------------------------------------------------------------- strings
 
@@ -185,15 +265,143 @@ local const hostPortRe = "^[^\(space)]*:[0-9]{1,5}$"
 }
 typealias HostPort = String(search(this, hostPortRe))
 
-local const postgresRe = #"^postgres(ql)?://"#
+local const httpsRe = "^https://[^\(space)/?#]+([/?#][^\(space)]*)?$"
 
-/// A PostgreSQL connection URL, by its scheme.
+/// An `https://` URL with a host. No white space and no line break. None of the URL
+/// types is a full RFC 3986 parser: each says what a field MAY hold, and the rules
+/// that matter are the scheme and a host.
+@A.Pattern {
+  regex = httpsRe
+  valid { "https://example.com"; "https://a.b:8443/p?q=1#f" }
+  invalid { "http://example.com"; "https://"; "example.com"; "https://a b"; "https:///p"; "" }
+}
+typealias HttpsUrl = String(search(this, httpsRe))
+
+local const httpRe = "^https?://[^\(space)/?#]+([/?#][^\(space)]*)?$"
+
+/// An `http://` or `https://` URL with a host.
+@A.Pattern {
+  regex = httpRe
+  valid { "http://svc.ns:8080/x"; "https://example.com" }
+  invalid { "ftp://example.com"; "http://"; "svc:8080"; "http://a b"; "" }
+}
+typealias HttpUrl = String(search(this, httpRe))
+
+local const natsRe = "^(nats|tls)://[^\(space)/?#]+([/?#][^\(space)]*)?$"
+
+/// A NATS server URL: `nats://` (cleartext) or `tls://`, with a host.
+@A.Pattern {
+  regex = natsRe
+  valid { "nats://nats.nats:4222"; "tls://nats.example:4222" }
+  invalid { "http://nats:4222"; "nats://"; "nats:4222"; "nats://a b"; "" }
+}
+typealias NatsUrl = String(search(this, natsRe))
+
+local const ociRe = "^oci://[^\(space)/?#]+(/[^\(space)]*)?$"
+
+/// An OCI reference URL: `oci://` with a registry host and an optional path,
+/// `oci://registry.example/charts/app`. A tag or a digest, when there is one, is
+/// part of the path.
+@A.Pattern {
+  regex = ociRe
+  valid { "oci://registry.example/charts"; "oci://registry.example:5000/a/b:1.0" }
+  invalid { "https://registry.example/x"; "oci://"; "registry.example/x"; "oci://a b"; "" }
+}
+typealias OciUrl = String(search(this, ociRe))
+
+/// The letters of a parameter NAME, each also in its percent-encoded spelling
+/// (`%70`, hex digits in either case), so `pass%77ord=` is the same rule as
+/// `password=`: libpq decodes a parameter name before it reads it.
+local const function paramName(name: String): String =
+  name.chars
+    .map((c) ->
+      let (hex = c.codePoints.first.toRadixString(16))
+        "(\(c)|%\(hex)\(if (hex.toUpperCase() == hex) "" else "|%\(hex.toUpperCase())"))"
+    )
+    .join("")
+
+/// `?` or `&`, then the parameter name, then `=`.
+local const function param(name: String): String = "[?&]\(paramName(name))="
+
+local const postgresRe = "^postgres(ql)?://[^\(space)/?#]+([/?#][^\(space)]*)?$"
+local const userinfoPasswordRe = "^postgres(ql)?://[^/?#@:]*:[^/?#]*@"
+local const passwordParamRe = param("password")
+local const sslPasswordParamRe = param("sslpassword")
+local const passfileParamRe = param("passfile")
+local const tlsParamRe =
+  "(\(param("sslmode"))|\(param("sslrootcert"))|\(param("sslcert"))|\(param("sslkey")))"
+
+/// Every rule a PostgreSQL URL must not break, as data: the alias's constraint and
+/// its `@A.NotPattern` annotations name the same members.
+local const forbidden: Listing<String> = new {
+  userinfoPasswordRe
+  passwordParamRe
+  sslPasswordParamRe
+  passfileParamRe
+  tlsParamRe
+}
+
+/// Whether `s` matches none of the `forbidden` patterns (search semantics).
+local const function neverMatches(s: String, forbidden: Listing<String>): Boolean =
+  !forbidden.toList().any((re) -> search(s, re))
+
+/// A PostgreSQL connection URL: `postgres://` or `postgresql://` and a host, that
+/// carries NO credential and NO TLS setting:
+///
+///   - no password in the user info (`scheme://user:pass@host`); the user alone
+///     (`scheme://user@host`) is fine;
+///   - no `password=` or `sslpassword=` query parameter, nor a percent-encoded
+///     spelling of the name (`pass%77ord=`);
+///   - no `passfile=`;
+///   - no `sslmode=`, `sslrootcert=`, `sslcert=` or `sslkey=`: transport security
+///     is a setting of its own (a `TlsMode`), which the consumer turns into the
+///     connection's `sslmode`, not a part of the address.
+///
+/// The credential lives in a `SecretRef`. Before v0.5.0 the alias checked the
+/// scheme only. Pkl enforces the rules; the same rules are `NotPattern`
+/// annotations, which a generator renders as `not: { pattern }` (JSON Schema), a
+/// refinement (zod) and a validator (pydantic).
 @A.Pattern {
   regex = postgresRe
-  valid { "postgres://u@h:5432/db"; "postgresql://h/db" }
-  invalid { "mysql://h/db"; "h/db" }
+  valid { "postgres://u@h:5432/db"; "postgresql://h/db"; "postgres://user@h/db?application_name=x" }
+  invalid { "mysql://h/db"; "h/db"; "postgres://"; "postgres://h/d b"; "" }
 }
-typealias PostgresUrl = String(search(this, postgresRe))
+@A.NotPattern {
+  regex = userinfoPasswordRe
+  reason = "a password in the user info: use a SecretRef"
+  invalid { "postgres://u:p@h/db"; "postgresql://:p@h/db" }
+}
+@A.NotPattern {
+  regex = passwordParamRe
+  reason = "a password query parameter: use a SecretRef"
+  invalid {
+    "postgres://h/db?password=x"
+    "postgres://h/db?a=b&password=x"
+    "postgres://h/db?pass%77ord=x"
+  }
+}
+@A.NotPattern {
+  regex = sslPasswordParamRe
+  reason = "an sslpassword query parameter: use a SecretRef"
+  invalid { "postgres://h/db?sslpassword=x"; "postgres://h/db?%73slpassword=x" }
+}
+@A.NotPattern {
+  regex = passfileParamRe
+  reason = "a passfile query parameter: use a SecretRef"
+  invalid { "postgres://h/db?passfile=/x"; "postgres://h/db?a=b&passfile=/x" }
+}
+@A.NotPattern {
+  regex = tlsParamRe
+  reason =
+    "a TLS query parameter (sslmode, sslrootcert, sslcert, sslkey): use the transport's TlsMode"
+  invalid {
+    "postgres://h/db?sslmode=require"
+    "postgres://h/db?sslrootcert=/ca"
+    "postgres://h/db?sslcert=/c"
+    "postgres://h/db?sslkey=/k"
+  }
+}
+typealias PostgresUrl = String(search(this, postgresRe), neverMatches(this, forbidden))
 
 local const digestRe = #"^(sha256:[0-9a-f]{64})?$"#
 
@@ -277,10 +485,13 @@ local const urlPathOrEmptyRe = "^(/[^\(space)'\"<>;,?#]*)?$"
 @A.Pattern { regex = urlPathOrEmptyRe; valid { ""; "/x" }; invalid { "x"; "/a?b" } }
 typealias UrlPathOrEmpty = String(search(this, urlPathOrEmptyRe))
 
-local const dnsLabelRe = #"^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"#
+local const dnsLabelRe = #"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"#
 
-/// A lower-case DNS name, as Kubernetes spells a resource name, or empty.
-@A.Pattern { regex = dnsLabelRe; valid { ""; "a-b.c" }; invalid { "-a"; "A"; "a_b" } }
+/// A lower-case DNS name, as Kubernetes spells a resource name. Never empty (it
+/// admitted `""` before v0.5.0): a field that may be left out is `DnsName?`,
+/// absent. Looser than `DnsSubdomain`, which bounds each label and the whole and
+/// refuses an empty label or a hyphen next to a dot; prefer that.
+@A.Pattern { regex = dnsLabelRe; valid { "a"; "a-b.c" }; invalid { ""; "-a"; "A"; "a_b" } }
 typealias DnsName = String(search(this, dnsLabelRe))
 
 local const dnsLabelStrictRe = #"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"#
@@ -297,6 +508,163 @@ local const dnsLabelStrictRe = #"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"#
 }
 @A.Length { max = 63 }
 typealias DnsLabel = String(search(this, dnsLabelStrictRe), length <= 63)
+
+local const dnsSubdomainRe =
+  #"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$"#
+
+/// An RFC 1123 subdomain, Kubernetes' resource name: dot-separated `DnsLabel`s, at
+/// most 253 characters in all. Never empty, and no empty label or hyphen next to a
+/// dot (`DnsName` admits the latter).
+@A.Pattern {
+  regex = dnsSubdomainRe
+  valid { "a"; "my-secret"; "a.b.c"; "db-1.internal.example" }
+  invalid { ""; "-a"; "a-"; "a..b"; ".a"; "a."; "a.-b"; "A.b"; "a_b"; "a b" }
+}
+@A.Length { min = 1; max = 253 }
+typealias DnsSubdomain = String(search(this, dnsSubdomainRe), length >= 1, length <= 253)
+
+local const projectNameRe = #"^[a-z][a-z0-9-]{0,30}[a-z0-9]$"#
+
+/// A project name: it starts with a letter and ends with a letter or a digit,
+/// lower-case letters, digits and hyphens in between, 2 to 32 characters (one
+/// character is not a project name).
+@A.Pattern {
+  regex = projectNameRe
+  valid { "ab"; "my-project"; "my-project-2"; "a23456789012345678901234567890b2" }
+  invalid { ""; "a"; "1a"; "-ab"; "ab-"; "Ab"; "a_b"; "a.b"; "a2345678901234567890123456789012b" }
+}
+@A.Length { min = 2; max = 32 }
+typealias ProjectName = String(search(this, projectNameRe), length >= 2, length <= 32)
+
+/// An install name (a release or deployment name): a `DnsLabel` of at most 40
+/// characters, which leaves room for the suffixes a chart appends.
+@A.Length { min = 1; max = 40 }
+typealias InstallName = DnsLabel(length <= 40)
+
+local const secretKeyBody = #"[a-z0-9]([a-z0-9-]*[a-z0-9])?"#
+local const secretKeyRe = "^\(secretKeyBody)$"
+
+/// A key inside a secret, in kebab-case: lower-case letters, digits and hyphens,
+/// starting and ending with a letter or a digit, 1 to 253 characters. A key a third
+/// party fixes is an `UpstreamSecretKey`, never this.
+@A.Pattern {
+  regex = secretKeyRe
+  valid { "password"; "api-key"; "a1"; "token-2" }
+  invalid { ""; "-a"; "a-"; "Api-Key"; "api_key"; "tls.key"; "a b" }
+}
+@A.Length { min = 1; max = 253 }
+typealias SecretKey = String(search(this, secretKeyRe), length >= 1, length <= 253)
+
+/// A secret key an upstream fixes and we cannot rename: a closed list. A new entry
+/// is a reviewed change, with the upstream that dictates it named here.
+///
+///   - `tls.crt`, `tls.key`: `kubernetes.io/tls` secrets (certificate managers,
+///     Gateway API, Ingress);
+///   - `ca.crt`: the CA certificate a certificate manager or a database operator
+///     writes next to them;
+///   - `.dockerconfigjson`: `kubernetes.io/dockerconfigjson` pull secrets;
+///   - `github_app_id`, `github_app_installation_id`, `github_app_private_key`: the
+///     keys a runner controller's GitHub App secret reads;
+///   - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`: the names
+///     the AWS SDKs read from the environment.
+typealias UpstreamSecretKey =
+  "tls.crt"
+    | "tls.key"
+    | "ca.crt"
+    | ".dockerconfigjson"
+    | "github_app_id"
+    | "github_app_installation_id"
+    | "github_app_private_key"
+    | "AWS_ACCESS_KEY_ID"
+    | "AWS_SECRET_ACCESS_KEY"
+    | "AWS_SESSION_TOKEN"
+
+local const upstreamSecretKeysRe =
+  #"tls\.crt|tls\.key|ca\.crt|\.dockerconfigjson|github_app_id|github_app_installation_id|github_app_private_key|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN"#
+local const secretRefKeyRe = "^(\(secretKeyBody)|\(upstreamSecretKeysRe))$"
+
+/// What `SecretRef.key` admits: a `SecretKey` or an `UpstreamSecretKey`, as one
+/// string type. It is the union `SecretKey | UpstreamSecretKey` written as one
+/// pattern, because the Kotlin code generator refuses a union of a string type and
+/// string literals, and a vocabulary class has to be generated for every language.
+/// The set of values is the union's; `test/VocabTest.pkl` checks that every member
+/// of `UpstreamSecretKey` is admitted, so that adding one to the list and not here
+/// fails.
+@A.Pattern {
+  regex = secretRefKeyRe
+  valid {
+    "password"
+    "api-key"
+    "a1"
+    "tls.key"
+    "ca.crt"
+    ".dockerconfigjson"
+    "AWS_ACCESS_KEY_ID"
+    "github_app_id"
+  }
+  invalid {
+    ""
+    "-a"
+    "Api-Key"
+    "api_key"
+    "tls_key"
+    "TLS.KEY"
+    "tlsXkey"
+    "github_app_x"
+    "a b"
+    "tls.key.x"
+  }
+}
+@A.Length { min = 1; max = 253 }
+typealias SecretRefKey = String(search(this, secretRefKeyRe), length >= 1, length <= 253)
+
+/// A reference to one key of a Kubernetes Secret: where a secret lives, never its
+/// value. One class, `{secretName, key}`, wherever a contract refers to a secret.
+class SecretRef {
+  /// The Secret's name.
+  secretName: DnsSubdomain
+
+  /// The key inside it: kebab-case (`SecretKey`), or one of the upstream-fixed
+  /// names (`UpstreamSecretKey`).
+  key: SecretRefKey
+}
+
+local const secretNameRe = #"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$"#
+
+/// The name of a secret under a file root (a mounted directory, a store path):
+/// relative path segments joined by `/`. A segment starts with a letter, a digit or
+/// an underscore, so none is empty, `.` or `..`, and the name is never absolute.
+/// `db/password`, `tls/server.crt`.
+@A.Pattern {
+  regex = secretNameRe
+  valid { "password"; "db/password"; "tls/server.crt"; "_x/a.b-c"; "a..b" }
+  invalid { ""; "/a"; "a/"; "a//b"; "."; ".."; "a/./b"; "a/../b"; ".hidden"; "a b"; "a\\b" }
+}
+typealias SecretName = String(search(this, secretNameRe))
+
+local const apiVersionRe =
+  #"^[a-z][a-z0-9-]*\.truvity\.github\.io/[A-Za-z][A-Za-z0-9]*/v[1-9][0-9]*$"#
+
+/// A contract's API version, `<product>.truvity.github.io/<kind>/v<N>`:
+/// `access.truvity.github.io/Roster/v1`. The product is lower-case with hyphens,
+/// the kind a name that starts with a letter, N a whole number from 1 without a
+/// leading zero.
+@A.Pattern {
+  regex = apiVersionRe
+  valid { "access.truvity.github.io/Roster/v1"; "my-product.truvity.github.io/Policy/v12" }
+  invalid {
+    ""
+    "access.truvity.github.io/Roster"
+    "access.truvity.github.io/Roster/v0"
+    "access.truvity.github.io/Roster/v01"
+    "access.truvity.github.io/Roster/1"
+    "access.example.io/Roster/v1"
+    "Access.truvity.github.io/Roster/v1"
+    "truvity.github.io/Roster/v1"
+    "access.truvity.github.io//v1"
+  }
+}
+typealias ApiVersion = String(search(this, apiVersionRe))
 
 local const statusCodesRe = #"^[A-Z_]+(\|[A-Z_]+)*$"#
 
@@ -315,6 +683,10 @@ typealias StatusCodeList = String(search(this, statusCodesRe))
 
 /// The lowest level a service writes.
 typealias LogLevel = "debug" | "info" | "warn" | "error"
+
+/// How a consumer learns that a secret changed: it re-reads the file, or it
+/// restarts.
+typealias Reload = "file" | "restart"
 
 /// How a workload's transport is authenticated.
 typealias TlsMode = "off" | "permissive" | "strict"
@@ -354,3 +726,7 @@ typealias Named = Dynamic(hasProperty("name"))
 /// An open object that must carry `name` and `mountPath`.
 @A.RequiresKeys { keys { "name"; "mountPath" } }
 typealias Mounted = Dynamic(hasProperty("name") && hasProperty("mountPath"))
+
+/// An open object with at least one key.
+@A.Properties { min = 1 }
+typealias NonEmptyObject = Dynamic(toMap().length >= 1)

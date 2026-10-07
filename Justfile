@@ -131,7 +131,10 @@ package:
     flag=""
     git fetch --quiet --depth=1 origin "refs/tags/v$version:refs/tags/v$version" 2>/dev/null || true
     if tag="$(git rev-parse --quiet --verify "refs/tags/v$version^{commit}")" && ! git diff --quiet "$tag" -- packages; then
-        awk '/^## Unreleased/{f=1;next} /^## /{f=0} f' CHANGELOG.md | grep -q '[^[:space:]]' \
+        # Read whole, then searched: `grep -q` quits at the first match, and an
+        # `awk` still writing a long section dies of SIGPIPE under pipefail.
+        unreleased="$(awk '/^## Unreleased/{f=1;next} /^## /{f=0} f' CHANGELOG.md)"
+        [ -n "$(printf '%s' "$unreleased" | tr -d '[:space:]')" ] \
             || { echo "package: v$version is released and the packages differ from it, but CHANGELOG.md has nothing under '## Unreleased'" >&2; exit 1; }
         echo "package: v$version is already released; its contents are not compared (auto-release bumps the version), the CHANGELOG's Unreleased section is the record"
         flag="--skip-publish-check"

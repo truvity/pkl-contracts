@@ -3,7 +3,10 @@
 /// The vocabulary's annotations become keywords: `@Range` is `minimum` and
 /// `maximum`, `@Length` is `minLength` and `maxLength`, `@Pattern` is `pattern`,
 /// `@Format` is `format`, `@RequiresKeys` is `required` on an open object,
-/// `@DenyKeys` is `propertyNames: { not: { enum: [...] } }`, and `@RequiredWhen`
+/// `@DenyKeys` is `propertyNames: { not: { enum: [...] } }`, `@Items` is `minItems`,
+/// `maxItems` and `uniqueItems`, `@Properties` is `minProperties` and
+/// `maxProperties`, `@NotPattern` is one `not: { pattern }` each under `allOf`, a
+/// union is `anyOf` (below), and `@RequiredWhen`
 /// and `@RequiredUnless` are an `if` with a `then` or an `else`, over nested
 /// `properties` and `required` for a dotted path. `@Range`'s `exclusiveMin` and
 /// `exclusiveMax` are `exclusiveMinimum` and `exclusiveMaximum`.
@@ -29,6 +32,16 @@
 ///     fill a default in and a reader must still find what it will be;
 ///   - `null` is not a value for an optional field: a property's type does not
 ///     include `null`, so `null` is a type error.
+///   - a union of types is `anyOf`, never `oneOf`. Pkl accepts a value that
+///     conforms to ANY member of a union, and so must the schema. `oneOf` also
+///     refuses a value that conforms to two members; where the members cannot
+///     overlap (a string and an object, a list and a scalar) the two keywords
+///     accept the same documents and `anyOf` is the cheaper to evaluate, and
+///     where they can (two closed classes whose properties are all optional both
+///     admit `{}`) `oneOf` would refuse what Pkl accepts. A union of plain
+///     scalars is `type: [...]`. A hand-written schema that says `oneOf` over
+///     members that cannot overlap is therefore matched by the generated `anyOf`,
+///     document for document.
 module contracts.jsonschema.JsonSchema
 
 import "@model/Model.pkl"
@@ -100,6 +113,11 @@ local function body(n: Model.Node): Dynamic =
         not = noLineBreak
       }
       when (n.format != null) { format = n.format.name }
+      // `@NotPattern`: one `not: { pattern }` for each rule, joined by `allOf`
+      // because a schema has `not` once and the line-break guard is already it.
+      when (!n.notPatterns.isEmpty) {
+        allOf = n.notPatterns.map((p) -> new Dynamic { not = new Dynamic { pattern = p.regex } })
+      }
     }
   else if (n.kind == "integer")
     bounds(new Dynamic { type = "integer" }, n.range)
@@ -108,16 +126,24 @@ local function body(n: Model.Node): Dynamic =
   else if (n.kind == "boolean")
     new Dynamic { type = "boolean" }
   else if (n.kind == "list")
-    new Dynamic { type = "array"; items = ofNode(n.items) }
+    (new Dynamic { type = "array"; items = ofNode(n.items) }) {
+      when (n.itemBounds?.min != null) { minItems = n.itemBounds.min }
+      when (n.itemBounds?.max != null) { maxItems = n.itemBounds.max }
+      when (n.itemBounds?.unique == true) { uniqueItems = true }
+    }
   else if (n.kind == "map")
     (new Dynamic { type = "object" }) {
       when (propertyNames(n) != null) { propertyNames = propertyNames(n) }
       when (n.items.kind != "any") { additionalProperties = ofNode(n.items) }
+      when (n.propertyBounds?.min != null) { minProperties = n.propertyBounds.min }
+      when (n.propertyBounds?.max != null) { maxProperties = n.propertyBounds.max }
     }
   else if (n.kind == "open")
     (new Dynamic { type = "object" }) {
       when (n.requiresKeys != null) { required = n.requiresKeys.keys.toList() }
       when (propertyNames(n) != null) { propertyNames = propertyNames(n) }
+      when (n.propertyBounds?.min != null) { minProperties = n.propertyBounds.min }
+      when (n.propertyBounds?.max != null) { maxProperties = n.propertyBounds.max }
     }
   else if (n.kind == "union")
     // `type: [...]` says only what each member IS, so it serves members that are a
@@ -131,6 +157,9 @@ local function body(n: Model.Node): Dynamic =
           && m.range == null
           && m.length == null
           && m.format == null
+          && m.notPatterns.isEmpty
+          && m.itemBounds == null
+          && m.propertyBounds == null
           && m.requiresKeys == null
           && m.kind != "enum"
           && m.kind != "object"

@@ -72,6 +72,59 @@ class Pattern extends Annotation {
   invalid: Listing<String>(!isEmpty)
 }
 
+/// A regular expression the value must NOT match (JSON Schema `not: { pattern }`).
+/// Search semantics, like `Pattern`. An alias may carry several, one for each
+/// rule, each with the reason a person is told. The alias also enforces the same
+/// expressions as a Pkl constraint, from one `local const` list that both name, so
+/// that Pkl and a generator say the same; the probes check that each `invalid`
+/// example is refused. `Pattern` says what a value looks like, `NotPattern` what
+/// it must never contain (a password in a connection URL, say), and an alias that
+/// has both admits a value that matches the first and none of the second.
+class NotPattern extends Annotation {
+  /// The expression the value must not match, with JSON Schema `pattern` (search)
+  /// semantics.
+  regex: String
+
+  /// Why: what is wrong with a value that matches, and where it belongs instead.
+  reason: String
+
+  /// Values the alias refuses because of this rule. At least one.
+  invalid: Listing<String>(!isEmpty)
+}
+
+/// A bound on the number of items of a `Listing` or a `List`, and whether they
+/// must be distinct. JSON Schema `minItems`, `maxItems` and `uniqueItems`; zod
+/// `.min()`, `.max()` and a refinement; pydantic `min_length`, `max_length` and a
+/// validator. On an alias it is the alias's own; on a PROPERTY it narrows the type
+/// the property has (the tighter bound of each end, and a set stays a set), and
+/// `Check.pkl` makes Pkl enforce it, as it does `Range` and `Length`: Pkl has no
+/// constraint a property could carry, and a constraint written on the type
+/// (`Listing<String>(length >= 1)`) is invisible to reflection, so a generator
+/// could not read it. Items are distinct when JSON values compare equal, whatever
+/// the order of an object's keys.
+class Items extends Annotation {
+  /// The fewest items allowed. Absent means unbounded.
+  min: Int?
+
+  /// The most items allowed. Absent means unbounded.
+  max: Int?
+
+  /// Whether no two items may be equal.
+  unique: Boolean = false
+}
+
+/// A bound on the number of entries of a `Mapping` or of keys of an open object:
+/// JSON Schema `minProperties` and `maxProperties`. Like `Items`, it is an
+/// alias's own, or, on a property, narrows the property's type and is enforced by
+/// `Check.pkl`.
+class Properties extends Annotation {
+  /// The fewest entries allowed. Absent means unbounded.
+  min: Int?
+
+  /// The most entries allowed. Absent means unbounded.
+  max: Int?
+}
+
 /// A property the schema REQUIRES and a chart's default values leave out: a
 /// bucket name, a host, a password Secret. A default of `""` would pass a
 /// `NonEmptyString` only by not being one, and would let an install that forgot

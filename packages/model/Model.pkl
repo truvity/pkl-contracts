@@ -54,6 +54,15 @@ class Node {
   requiresKeys: Dynamic?
   /// The keys a map or an open object must not carry (`@DenyKeys`, on a property).
   denyKeys: List<String>?
+  /// For `list`: the bound on the number of items and whether they must be
+  /// distinct (`@Items`), as data with `min`, `max` and `unique`.
+  itemBounds: Dynamic?
+  /// For `map` and `open`: the bound on the number of entries (`@Properties`), as
+  /// data with `min` and `max`.
+  propertyBounds: Dynamic?
+  /// The expressions a string must NOT match (`@NotPattern`), each as data with
+  /// `regex`, `reason` and `invalid`. Empty when there are none.
+  notPatterns: List<Dynamic> = List()
   /// The rules across fields written on an ALIAS of a class (`@RequiredWhen`,
   /// `@RequiredUnless`), each as `condition` describes. The ones written on the
   /// class or the module itself are `Cls.conditions`.
@@ -116,7 +125,7 @@ class Cls {
 local const function short(n: String): String = n.split(".").last
 
 local function qualify(mod: String, cls: String): String =
-  if (mod == "Fragments" || cls.startsWith(mod)) cls else mod + cls
+  if (mod == "Fragments" || mod == "Vocab" || cls.startsWith(mod)) cls else mod + cls
 
 /// Whether annotation `a` is an instance of the vocabulary's annotation class
 /// `name`. By name, not by `is`: a consumer that depends on the vocabulary as a
@@ -146,6 +155,12 @@ local function rangeIn(a: List<Annotation>): Dynamic? =
         exclusiveMax = r.getPropertyOrNull("exclusiveMax")
       }
 
+/// The `@Items` in `a` as data with all three fields, or null. A vocabulary of an
+/// earlier release has none, and the generators must read it too.
+local function itemsIn(a: List<Annotation>): Dynamic? =
+  let (i = find(a, "Items"))
+    if (i == null) null else new Dynamic { min = i.min; max = i.max; unique = i.unique }
+
 local function annots(a: List<Annotation>): Dynamic = new Dynamic {
   schema = find(a, "Schema")
   def = find(a, "Def")
@@ -155,6 +170,12 @@ local function annots(a: List<Annotation>): Dynamic = new Dynamic {
   format = find(a, "Format")
   requiresKeys = find(a, "RequiresKeys")
   chart = find(a, "Chart")
+  itemBounds = itemsIn(a)
+  propertyBounds = find(a, "Properties")
+  notPatterns =
+    a
+      .filter((x) -> named(x, "NotPattern"))
+      .map((x) -> x.toDynamic())
 }
 
 local function withAnnots(n: Node, a: List<Annotation>, adoc: String?, aalias: String?): Node =
@@ -170,6 +191,9 @@ local function withAnnots(n: Node, a: List<Annotation>, adoc: String?, aalias: S
       when (x.format != null) { format = x.format }
       when (x.requiresKeys != null) { requiresKeys = x.requiresKeys }
       when (x.chart != null) { chart = x.chart }
+      when (x.itemBounds != null) { itemBounds = x.itemBounds }
+      when (x.propertyBounds != null) { propertyBounds = x.propertyBounds }
+      when (!x.notPatterns.isEmpty) { notPatterns = x.notPatterns }
     }
 
 function nodeOf(t: reflect.Type): Node =
@@ -326,16 +350,40 @@ local function narrower(where: String, a: Dynamic?, b: Dynamic): Dynamic =
       else
         new Dynamic { min = lo; max = hi }
 
-/// The type of a property, with the `@Range`, `@Length` and `@DenyKeys` the
-/// property itself carries laid over the type's own. They narrow a number, a
-/// string and a map or open object, and nothing else; the type is then no longer
-/// the alias (zod and pydantic would refer to the alias by name and lose the
-/// bound), so it is spelled out.
+/// The tighter of two bounds on a count: the larger least, the smaller greatest,
+/// and a set stays a set. `a` is the property's own, `b` the type's.
+local function narrowerCount(where: String, a: Dynamic, b: Dynamic?): Dynamic =
+  if (b == null)
+    a
+  else
+    let (lo = bigger(a.min, b.min))
+    let (hi = smaller(a.max, b.max))
+      if (lo != null && hi != null && lo > hi)
+        throw(
+          "\(where): the bound of the property and the one of its type leave no count (from \(lo) to \(hi))"
+        )
+      else
+        (a) {
+          min = lo
+          max = hi
+          when (a.getPropertyOrNull("unique") != null || b.getPropertyOrNull("unique") != null) {
+            unique =
+              (a.getPropertyOrNull("unique") ?? false) || (b.getPropertyOrNull("unique") ?? false)
+          }
+        }
+
+/// The type of a property, with the `@Range`, `@Length`, `@DenyKeys`, `@Items` and
+/// `@Properties` the property itself carries laid over the type's own. They narrow
+/// a number, a string, a map or open object, a list and a map or open object
+/// again, and nothing else; the type is then no longer the alias (zod and pydantic
+/// would refer to the alias by name and lose the bound), so it is spelled out.
 local function narrowed(where: String, n: Node, a: List<Annotation>): Node =
   let (r = rangeIn(a))
   let (l = find(a, "Length"))
   let (d = find(a, "DenyKeys"))
-    if (r == null && l == null && d == null)
+  let (it = itemsIn(a))
+  let (pr = find(a, "Properties"))
+    if (r == null && l == null && d == null && it == null && pr == null)
       n
     else if (r != null && n.kind != "integer" && n.kind != "number")
       throw("\(where): @Range is for a number, and this property is \(n.kind)")
@@ -343,6 +391,10 @@ local function narrowed(where: String, n: Node, a: List<Annotation>): Node =
       throw("\(where): @Length is for a string, and this property is \(n.kind)")
     else if (d != null && n.kind != "map" && n.kind != "open")
       throw("\(where): @DenyKeys is for a map or an open object, and this property is \(n.kind)")
+    else if (it != null && n.kind != "list")
+      throw("\(where): @Items is for a list, and this property is \(n.kind)")
+    else if (pr != null && n.kind != "map" && n.kind != "open")
+      throw("\(where): @Properties is for a map or an open object, and this property is \(n.kind)")
     else
       (n) {
         alias = null
@@ -350,6 +402,8 @@ local function narrowed(where: String, n: Node, a: List<Annotation>): Node =
         when (r != null) { range = narrowerRange(where, n.range, r) }
         when (l != null) { length = narrower(where, n.length, l) }
         when (d != null) { denyKeys = (n.denyKeys ?? List()) + d.keys.toList() }
+        when (it != null) { itemBounds = narrowerCount(where, it, n.itemBounds) }
+        when (pr != null) { propertyBounds = narrowerCount(where, pr, n.propertyBounds) }
       }
 
 /// What Pkl gives a property of type `t` when nobody sets it: an instance of
@@ -913,6 +967,18 @@ function conditionPhrase(d: Condition): String =
     else
       "when `\(d.property)` is \(vs), \(need) are required"
 
+/// A bound on a count in words, `one` and `many` being the noun in the singular
+/// and in the plural.
+local function countPhrases(b: Dynamic, one: String, many: String): List<String> =
+  let (noun = (n: Int) -> if (n == 1) one else many)
+    if (b.min != null && b.max != null)
+      List("\(b.min) to \(b.max) \(noun.apply(b.max))")
+    else
+      List(
+        if (b.min != null) "at least \(b.min) \(noun.apply(b.min))" else null,
+        if (b.max != null) "at most \(b.max) \(noun.apply(b.max))" else null,
+      ).filterNonNull()
+
 /// The constraints `n` carries, one phrase each, for documentation.
 function constraintsOf(n: Node): List<String> =
   (if (n.range == null) List() else List(rangePhrase(n.range)))
@@ -930,6 +996,20 @@ function constraintsOf(n: Node): List<String> =
         )
     )
     + (if (n.pattern == null) List() else List("matches `\(n.pattern.regex)`, never a line break"))
+    + n.notPatterns.map((p) -> "must not match `\(p.regex)` (\(p.reason))")
+    + (if (n.itemBounds == null) List() else countPhrases(n.itemBounds, "item", "items"))
+    + (
+      if (n.itemBounds?.getPropertyOrNull("unique") == true)
+        List("items are distinct")
+      else
+        List()
+    )
+    + (
+      if (n.propertyBounds == null)
+        List()
+      else
+        countPhrases(n.propertyBounds, "property", "properties")
+    )
     + (if (n.format == null) List() else List("format `\(n.format.name)`"))
     + (
       if (n.requiresKeys == null)

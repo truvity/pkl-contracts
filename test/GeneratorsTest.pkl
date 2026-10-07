@@ -13,13 +13,15 @@ import "@typescript/Zod.pkl"
 
 import "conformance/charts/CondChart.pkl"
 import "conformance/contract/Blocks.pkl"
+import "conformance/contract/Collections.pkl"
 import "conformance/contract/Conditions.pkl"
 import "conformance/contract/Literals.pkl"
 import "conformance/contract/Names.pkl"
 import "conformance/union/Union.pkl"
 import "Showcase.pkl"
 
-local docs = Model.documents(List(Blocks, Conditions, Literals, Names, Showcase, Union))
+local docs =
+  Model.documents(List(Blocks, Collections, Conditions, Literals, Names, Showcase, Union))
 local zod = Zod.render(docs)
 local py = Pydantic.render(docs)
 local reference = Docs.render(docs)
@@ -165,5 +167,75 @@ facts {
     Helm.valuesSchema(chart).allOf.length == 2
     Helm.valuesSchema(chart).allOf.first.`if`.required == List("phase")
     Helm.valuesSchema(chart).allOf.last.`else`.properties["database"].required == List("host")
+  }
+  ["a count on a list is minItems, maxItems and uniqueItems, and on a map minProperties and maxProperties"] {
+    local props = schema("collections").properties
+    props["certificates"].minItems == 1
+    !props["certificates"].toMap().containsKey("maxItems")
+    !props["certificates"].toMap().containsKey("uniqueItems")
+    props["names"].maxItems == 2
+    props["levels"].minItems == 1
+    props["levels"].maxItems == 3
+    props["levels"].uniqueItems == true
+    props["ports"].uniqueItems == true
+    !props["ports"].toMap().containsKey("minItems")
+    props["objects"].uniqueItems == true
+    // A bound on the items of a list is the items' own, not the list's.
+    props["from"].items.minProperties == 1
+    !props["from"].toMap().containsKey("minItems")
+    props["labels"].minProperties == 1
+    props["annotations"].maxProperties == 2
+    props["selector"].minProperties == 1
+    props["selector"].maxProperties == 3
+    // An alias carries its own.
+    schema("showcase").properties["nonEmptyObject"].minProperties == 1
+  }
+  ["a count on a list or a map is a refinement in zod and a Field in pydantic"] {
+    zod.contains("levels: z.array(LogLevel).min(1).max(3).refine(distinct, ")
+    zod.contains("certificates: z.array(NonEmptyString).min(1).optional()")
+    zod.contains("ports: z.array(Port).refine(distinct, ")
+    zod.contains("labels: z.record(z.string(), NonEmptyString).refine((o) => sized(o) >= 1, ")
+    zod.contains("selector: z.looseObject({}).refine((o) => sized(o) >= 1, ")
+    zod.contains("must have at least 1 entry")
+    zod.contains("must have at most 3 entries")
+    py.contains(
+      "levels: Annotated[list[LogLevel], Field(min_length=1, max_length=3), AfterValidator(_distinct)] | None = None",
+    )
+    py.contains("certificates: Annotated[list[NonEmptyString], Field(min_length=1)] | None = None")
+    py.contains("labels: Annotated[dict[str, NonEmptyString], Field(min_length=1)] | None = None")
+    py.contains("annotations: Annotated[dict[str, str], Field(max_length=2)] | None = None")
+    reference.contains("1 to 3 items; items are distinct")
+    reference.contains("at least 1 property")
+    reference.contains("at most 2 properties")
+  }
+  ["a rule that a string must not match is a not in the schema, a refine in zod and a validator in pydantic"] {
+    local url = schema("collections").properties["url"]
+    // One `not` for each rule, beside the line-break guard that is the schema's own.
+    url.allOf.length == 5
+    url.allOf.every((m) -> m.not.pattern != null)
+    url.allOf.first.not.pattern == "^postgres(ql)?://[^/?#@:]*:[^/?#]*@"
+    url.not.pattern == Model.lineBreakClass
+    zod.contains(
+      #".refine((s) => !/^postgres(ql)?:\/\/[^\/?#@:]*:[^\/?#]*@/.test(s), { message: "a password in the user info: use a SecretRef" })"#,
+    )
+    py.contains(
+      #"AfterValidator(_not_pattern(r"^postgres(ql)?://[^/?#@:]*:[^/?#]*@", "a password in the user info: use a SecretRef"))"#,
+    )
+    reference.contains(
+      "must not match `^postgres(ql)?://[^/?#@:]*:[^/?#]*@` (a password in the user info: use a SecretRef)",
+    )
+  }
+  ["a union is anyOf, never oneOf, with each member's own schema"] {
+    local namespaces = schema("union").properties["namespaces"].items
+    namespaces.anyOf.length == 2
+    namespaces.anyOf.first.type == "string"
+    namespaces.anyOf.first.minLength == 1
+    namespaces.anyOf.last.type == "object"
+    namespaces.anyOf.last.required == List("name")
+    schema("union").properties["either"].anyOf.length == 2
+    !namespaces.toMap().containsKey("oneOf")
+    !schema("union").properties["either"].toMap().containsKey("oneOf")
+    zod.contains("z.union([NonEmptyString, z.lazy(() => UnionNamespace)])")
+    py.contains("NonEmptyString | UnionNamespace")
   }
 }

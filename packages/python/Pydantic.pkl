@@ -26,6 +26,16 @@
 ///     a subclass adds to its base's instead of replacing it;
 ///   - `@DenyKeys` is an `AfterValidator` that refuses a key on the list;
 ///   - an exclusive bound is `Field(gt=...)` or `Field(lt=...)`;
+///   - `@Items` is `Field(min_length=..., max_length=...)` on the list, and
+///     `uniqueItems` an `AfterValidator` (`_distinct`) that compares the items as
+///     JSON with the keys sorted, as JSON Schema does; `@Properties` is the same
+///     `Field(min_length=..., max_length=...)` on the `dict`;
+///   - `@NotPattern` is an `AfterValidator` (`_not_pattern`) that refuses a
+///     match of the rule's expression, with its reason as the message. It is
+///     Python's `re`, where `pattern` is pydantic's own engine: the vocabulary
+///     writes its expressions in the subset the two share;
+///   - a union is `X | Y`, which, like JSON Schema's `anyOf`, accepts a value that
+///     is any member (see `JsonSchema`);
 ///   - a property whose name is not a usable attribute (`service-lib`, a Python
 ///     keyword such as `global`, a leading underscore or digit) is declared
 ///     under a safe name with
@@ -152,18 +162,52 @@ local function ann(n: Model.Node): String =
 
 local function constraints(parts: List<String?>): String = parts.filterNonNull().join(", ")
 
-local function inner(n: Model.Node): String =
-  if (n.kind == "string")
-    if (n.length == null && n.pattern == null)
-      "str"
-    else
-      "Annotated[str, StringConstraints(\(constraints(
+local function stringType(n: Model.Node): String =
+  let (
+    sc =
+      constraints(
         List(
           if (n.length?.min != null) "min_length=\(n.length.min)" else null,
           if (n.length?.max != null) "max_length=\(n.length.max)" else null,
           if (n.pattern != null) "pattern=\(rawStr(n.pattern.regex))" else null,
         ),
-      ))\(if (n.pattern != null) "), AfterValidator(_no_line_break)]" else ")]")"
+      )
+  )
+  let (
+    parts =
+      List(
+        if (sc != "") "StringConstraints(\(sc))" else null,
+        if (n.pattern != null) "AfterValidator(_no_line_break)" else null,
+      ).filterNonNull()
+        + n.notPatterns.map((p) ->
+          "AfterValidator(_not_pattern(\(rawStr(p.regex)), \(lit(p.reason))))"
+        )
+  )
+    if (parts.isEmpty) "str" else "Annotated[str, \(parts.join(", "))]"
+
+/// A list type with the validators its node asks for: the number of its items
+/// (`@Items`) and that they are distinct.
+local function listType(base: String, n: Model.Node): String =
+  let (
+    parts =
+      List(
+        if (n.itemBounds?.min != null || n.itemBounds?.max != null)
+          "Field(\(constraints(
+            List(
+              if (n.itemBounds.min != null) "min_length=\(n.itemBounds.min)" else null,
+              if (n.itemBounds.max != null) "max_length=\(n.itemBounds.max)" else null,
+            ),
+          )))"
+        else
+          null,
+        if (n.itemBounds?.unique == true) "AfterValidator(_distinct)" else null,
+      ).filterNonNull()
+  )
+    if (parts.isEmpty) base else "Annotated[\(base), \(parts.join(", "))]"
+
+local function inner(n: Model.Node): String =
+  if (n.kind == "string")
+    stringType(n)
   else if (n.kind == "integer")
     "Annotated[int, BeforeValidator(_integral)\(range(n))]"
   else if (n.kind == "number")
@@ -173,7 +217,7 @@ local function inner(n: Model.Node): String =
   else if (n.kind == "enum")
     "Literal[\(n.values.map((v) -> lit(v)).join(", "))]"
   else if (n.kind == "list")
-    "list[\(ann(n.items))]"
+    listType("list[\(ann(n.items))]", n)
   else if (n.kind == "map")
     dict("dict[\(ann(n.key)), \(ann(n.items))]", n)
   else if (n.kind == "open")
@@ -183,12 +227,22 @@ local function inner(n: Model.Node): String =
   else
     "Any"
 
-/// A dictionary type with the validators its node asks for: the keys it must
-/// carry (`@RequiresKeys`) and the ones it must not (`@DenyKeys`).
+/// A dictionary type with the validators its node asks for: the number of its
+/// entries (`@Properties`), the keys it must carry (`@RequiresKeys`) and the ones
+/// it must not (`@DenyKeys`).
 local function dict(base: String, n: Model.Node): String =
   let (
     vs =
       List(
+        if (n.propertyBounds?.min != null || n.propertyBounds?.max != null)
+          "Field(\(constraints(
+            List(
+              if (n.propertyBounds.min != null) "min_length=\(n.propertyBounds.min)" else null,
+              if (n.propertyBounds.max != null) "max_length=\(n.propertyBounds.max)" else null,
+            ),
+          )))"
+        else
+          null,
         if (n.requiresKeys != null)
           "AfterValidator(_has_keys(\(lit(n.requiresKeys.keys.toList()))))"
         else
@@ -301,6 +355,8 @@ local header: String =
   # Generated from a contract by contracts.python. Do not edit.
   from __future__ import annotations
 
+  import json
+  import re
   from typing import Annotated, Any, Literal
 
   from pydantic import (
@@ -318,6 +374,31 @@ local header: String =
       # Every character that ends a line in some engine: LF, CR, FF, VT, NEL, LS, PS.
       if any(c in value for c in "\n\r\f\v\x85\u2028\u2029"):
           raise ValueError("a line break is not allowed")
+      return value
+
+
+  def _not_pattern(pattern: str, reason: str):
+      compiled = re.compile(pattern)
+
+      def check(value: str) -> str:
+          if compiled.search(value):
+              raise ValueError(f"must not match {pattern}: {reason}")
+          return value
+
+      return check
+
+
+  def _canon(value: Any) -> str:
+      # JSON with the keys sorted, so that two values that differ only in the
+      # order of an object's keys are one value (JSON Schema's equality).
+      if isinstance(value, BaseModel):
+          value = value.model_dump(mode="json", by_alias=True)
+      return json.dumps(value, sort_keys=True, default=str)
+
+
+  def _distinct(value: list[Any]) -> list[Any]:
+      if len({_canon(item) for item in value}) != len(value):
+          raise ValueError("items must be distinct")
       return value
 
 

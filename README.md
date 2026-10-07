@@ -48,7 +48,8 @@ Three nouns.
   its constraint twice, as the expression Pkl enforces and as an annotation a
   generator reads, from the same constants; probes keep the two honest. A field
   whose rule is only a bound (a minimum, a length, a port that may be zero) says
-  so with `@A.Range` or `@A.Length` on the property, laid over the type it has.
+  so with `@A.Range` or `@A.Length` on the property, laid over the type it has, and
+  a count on a list or a map with `@A.Items` or `@A.Properties`.
 - **A fragment** is a shape two services spell the same way: how a listener, a
   log level, a database, a broker or an object store is described. Each is one
   JSON Schema document, with the `$id` of the hand-written schema it was written
@@ -66,15 +67,16 @@ with their reasons.
 ## Install and a worked example
 
 Pin the packages the contract is written with (the three below), and the generators you run (`contracts.jsonschema` and the others, as `pkl run package://...#/Generate.pkl` or as dependencies), at the exact version, in your `PklProject`, and run
-`pkl project resolve` to record their checksums:
+`pkl project resolve` to record their checksums. `<version>` is a release tag
+without the `v`, from the [releases page](https://github.com/truvity/pkl-contracts/releases):
 
 ```pkl
 amends "pkl:Project"
 
 dependencies {
-  ["vocab"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.vocab@0.1.0" }
-  ["fragments"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.fragments@0.1.0" }
-  ["templates"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.templates@0.1.0" }
+  ["vocab"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v<version>/contracts.vocab@<version>" }
+  ["fragments"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v<version>/contracts.fragments@<version>" }
+  ["templates"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v<version>/contracts.templates@<version>" }
 }
 ```
 
@@ -107,7 +109,7 @@ amends "Chart.pkl"
 config {
   listen { address = ":8080" }
   probes { address = ":7070" }
-  postgres { url = "postgres://echo@db.example.com:5432/echo?sslmode=require" }
+  postgres { url = "postgres://echo@db.example.com:5432/echo" }
 }
 
 images {
@@ -128,7 +130,7 @@ config:
   listen:
     address: :8080
   postgres:
-    url: postgres://echo@db.example.com:5432/echo?sslmode=require
+    url: postgres://echo@db.example.com:5432/echo
     maxConnections: 10
 images:
   echo:
@@ -145,11 +147,14 @@ and compares the result with the committed `values.yaml`.
 
 ## Consumers
 
-None yet outside this repository. The surface is a Pkl project depending on the
-three packages and running the generators; the first consumers will be the
-repositories that build JSON Schemas, chart values
-schemas and language types from a contract, and the repositories that author
-one.
+The surface is a Pkl project depending on the packages by their release URIs
+and running the generators. Inside this repository the consumers are the worked
+example (`examples/service`) and the conformance suite (`test/`), which depend on
+the packages by path. A first consuming repository is adopting the packages one
+chart at a time, and what it needs of the vocabulary and the generators is what
+this repository grows: the vocabulary types and the list and object keywords were
+added for it. Until a repository has moved its hand-written schemas over, those stay
+authoritative and the generated ones are compared with them.
 
 ## Neighbours
 
@@ -167,8 +172,7 @@ one.
 - [docs/authoring.md](docs/authoring.md): the rules a contract is held to, and
   how each is checked.
 - [docs/packaging.md](docs/packaging.md): the one version, the package URIs, the
-  release assets, how they are verified before a release exists, and what a
-  release workflow will need.
+  release assets, how they are verified, and the release workflows.
 - The doc comments in the modules are the reference for every alias, class and
   field.
 
@@ -188,8 +192,10 @@ with its probes, nine fragments (listener, probes, log, drain, TLS, PostgreSQL,
 NATS, NATS consumer, object store) and the platform block, the two templates,
 and the generators: JSON Schema, Helm values, TypeScript with zod, Python with
 pydantic, and a Markdown reference, plus a compatibility diff of two sets of
-schemas. The first three are released as v0.1.0; the generators ship with the
-next release, so until then they are run from this checkout.
+schemas. All nine are released together, on every tag (see the
+[releases](https://github.com/truvity/pkl-contracts/releases)), and `CHANGELOG.md`
+says what changed for a consumer. A change made since the latest release is under
+its `## Unreleased` heading.
 
 Generated, and agreed on: the conformance suite (`just conformance`) asks nine
 validators about every fixture and probe (four JSON Schema engines, zod,
@@ -203,9 +209,8 @@ line break and spells white space out, so a split fails the run
 What is not here: the fragments `LambdaArgs`, `SystemdUnit` and `Secrets` and
 the templates `LambdaValues` and `UnitValues`, which wait for a source shape; a
 Go or Kotlin generator of our own (the official ones are used, and their types
-are shapes only); and a release workflow of our own beyond what
-[docs/packaging.md](docs/packaging.md) describes. Pkl is fetched by `bin/pkl`
-rather than devbox until nixpkgs ships 0.32 or newer.
+are shapes only). Pkl is fetched by `bin/pkl` rather than devbox until nixpkgs
+ships 0.32 or newer.
 
 ## Development
 
@@ -224,9 +229,12 @@ The worked example's render is the one committed file to regenerate by hand:
 ## Releasing
 
 All packages are released together under one version, `vX.Y.Z`, written once in
-`packages/Release.pkl`. The first release will be v0.1.0. Releases are manual
-for now, and minors and majors always will be; there is no release workflow and
-auto-release is not armed ([docs/packaging.md](docs/packaging.md)).
+`packages/Release.pkl`. A release is a pull request that moves that version, runs
+`just resolve` and gives the CHANGELOG its heading; pushing the tag `vX.Y.Z` runs
+`.github/workflows/release.yaml`, which builds and publishes the assets and
+resolves them from github.com. Minors and majors are always cut by hand. The patch
+tag can be cut by `.github/workflows/auto-release.yaml`, which is off unless the
+repository is configured for it ([docs/packaging.md](docs/packaging.md)).
 
 ## Licence
 

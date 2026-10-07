@@ -50,7 +50,7 @@ class Drain {
   title = "postgres"
 }
 class Postgres {
-  /// A connection URL without credentials, for example postgres://user@host:5432/dbname?sslmode=require.
+  /// A connection URL without credentials, for example postgres://user@host:5432/dbname. It carries no password and no `sslmode` (or other TLS parameter): the password is named by `passwordEnv`, and transport security is the service's own setting.
   url: V.PostgresUrl
   /// The NAME of the environment variable holding the password. Unset means the connection needs none.
   passwordEnv: V.NonEmptyString?

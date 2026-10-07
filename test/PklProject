@@ -6,6 +6,7 @@ amends "pkl:Project"
 
 tests {
   "ProbesTest.pkl"
+  "VocabTest.pkl"
   "LintTest.pkl"
   "ContractsTest.pkl"
   "CompatTest.pkl"

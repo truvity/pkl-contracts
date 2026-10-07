@@ -49,6 +49,7 @@ for f in "${pkl[@]}"; do
     # parenthesis after a name), which the checks below mistake for a constraint.
     packages/model/* | packages/jsonschema/* | packages/helm/* | packages/typescript/* | packages/python/* | packages/docs/*) continue ;;
     packages/Release.pkl) continue ;; # package metadata, not a contract
+    hack/*) continue ;;               # tooling that writes Pkl, not a contract
     packages/*/PklProject | */PklProject) continue ;;
     test/*) continue ;;               # the tests may construct what they refuse
   esac
@@ -124,6 +125,11 @@ for f in "${pkl[@]}"; do
       if (s ~ /^[[:space:]]*(class|function|import|local|amends|extends|module|open|when|for)[[:space:]]/) next
       if (s ~ /^[[:space:]]*typealias[[:space:]]/) { i=index(s, "="); if (i == 0) next; t=substr(s, i+1) }
       else { i=index(s, ":"); if (i == 0) next; t=substr(s, i+1); j=index(t, "="); if (j > 0) t=substr(t, 1, j-1) }
+      # A union inside type arguments (`Listing<X | Y>?`) is not a union with a
+      # nullable member: the `?` binds to the whole `Listing`. Collapse every <...>
+      # to one name character first, so that only a bar outside any argument list is
+      # looked at (`X | Listing<Y>?` still is one).
+      while (t ~ /<[^<>]*>/) sub(/<[^<>]*>/, "_", t)
       if (t ~ /\|[[:space:]]*[A-Za-z0-9_.">`]+\?/) print n ":" s
     }')
 done
