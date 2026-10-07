@@ -1,0 +1,16 @@
+certificates:
+  - "-----BEGIN CERTIFICATE-----"
+names: [a, b]
+levels: [debug, error]
+ports: [80, 443]
+objects:
+  - {a: 1, b: 2}
+  - {a: 2, b: 1}
+from:
+  - {namespace: a}
+  - {podSelector: {}}
+labels: {team: x}
+annotations: {a: b, c: d}
+selector: {app: x}
+password: {secretName: db-credentials, key: password}
+url: postgres://app@db.example:5432/app

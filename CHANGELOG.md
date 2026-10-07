@@ -5,6 +5,83 @@ per tag. The prose bullets are written for a consumer; the commit subjects under
 them are the GitHub Release's own list. All packages are released together
 under one version, so a heading covers all of them.
 
+## Unreleased
+
+### Breaking
+
+- **Breaking: `Bytes` no longer admits an upper-case `K`.** `5K` is not a Kubernetes
+  quantity (the SI kilo is a lower-case `k`); the pattern is now
+  `^[0-9]+(Ki|Mi|Gi|Ti|k|M|G|T)?$`. A value that was `5K` becomes `5k` (or `5Ki`).
+- **Breaking: `DnsName` no longer admits the empty string.** A field that may be
+  left out is `DnsName?`, absent, as every vocabulary type has it. Prefer the new
+  `DnsSubdomain`, which also bounds each label and the whole and refuses a hyphen
+  next to a dot.
+- **Breaking: `PostgresUrl` checks more than the scheme.** It needs a host and
+  refuses, as `NotPattern` rules, a password in the user info, a `password=`,
+  `sslpassword=` or `passfile=` query parameter (also with a percent-encoded name,
+  `pass%77ord=`), and `sslmode=`, `sslrootcert=`, `sslcert=` and `sslkey=`: the
+  credential is a `SecretRef` and transport security a `TlsMode`, neither part of
+  the address. A URL that carried `?sslmode=require` must drop it. The fragment
+  `Postgres` and the worked example follow.
+- **Widened, and reported by the compatibility check as breaking all the same:
+  `GoDuration` and `PromDuration`.** The check cannot tell a widened pattern from
+  a tightened one and reports every changed pattern as breaking, so these two
+  appear in its report beside the real narrowings above. `GoDuration` is now a
+  deprecated alias of the new `Duration` and admits Go's whole `time.ParseDuration`
+  subset (compound parts, a decimal such as `1.5s`, `μs`), of which everything it
+  admitted before is a member. `PromDuration` admits compound values and the units
+  `ms`, `d`, `w` and `y` (`1h30m`, `1d`, `500ms`) as well as `s`, `m` and `h`.
+
+### Features
+
+- **A count on a list or a map: `@A.Items { min; max; unique }` and
+  `@A.Properties { min; max }`.** On a property (laid over its type, like `Range`
+  and `Length`) or on an alias. JSON Schema says `minItems`, `maxItems`,
+  `uniqueItems`, `minProperties` and `maxProperties`; zod `.min()`, `.max()` and a
+  `refine` for the distinct items and for the count of a record or an object;
+  pydantic `Field(min_length=..., max_length=...)` and an `AfterValidator` for the
+  distinct items; Pkl enforces them through `Check`; the reference lists them; the
+  probes try the bound and one step either side. Items are distinct when their JSON
+  is equal, whatever the order of an object's keys. A constraint written on the
+  type itself (`Listing<String>(length >= 1)`) cannot be read by a generator
+  (reflection erases it), which is why it is an annotation.
+- **`@A.NotPattern { regex; reason; invalid }`: a string must NOT match.** A JSON
+  Schema `not: { pattern }` for each rule under `allOf`, a zod `refine`, a pydantic
+  `AfterValidator`; the reference lists each with its reason. `PostgresUrl` is the
+  first user.
+- **A union of types is `anyOf`, and says so.** It always was; the choice over
+  `oneOf` is now documented in the JSON Schema generator (Pkl accepts a value that
+  is any member, so the schema must, and where the members cannot overlap, a string
+  and a block, the two keywords accept the same documents). Fixtures: a list whose
+  items are a name or a block, and two closed classes that the empty object
+  conforms to.
+- **The decided vocabulary.** Durations, each in the grammar of the system that
+  reads it: `Duration` (Go's `time.ParseDuration` subset), `GatewayDuration`
+  (GEP-2257), `KarpenterDuration`, `KargoDuration` and `Retention` (`30d`, `12M`).
+  `Seconds` and `Days`, for a field that mirrors an upstream integer. `OpenRatio`
+  (strictly between 0 and 1). Names: `DnsSubdomain`, `ProjectName`, `InstallName`.
+  URLs: `HttpsUrl`, `HttpUrl`, `NatsUrl`, `OciUrl`. Secrets: `SecretKey`,
+  `UpstreamSecretKey` (a closed list of the keys an upstream fixes), `SecretRefKey`
+  (the two as one string type, because the Kotlin code generator refuses their
+  union), the class `SecretRef { secretName; key }`, `SecretName`, `Reload`.
+  `ApiVersion`. `NonEmptyObject`, an open object with at least one key.
+- **The compatibility check probes every vocabulary type.** `hack/compat.sh`
+  generates, from each side's own vocabulary, a module with one property for every
+  alias and class (`hack/vocab-probe.pkl`) and compares the schemas generated from
+  it, so a change to any type, or a type removed, is classified, not only the ones
+  the worked example uses. `uniqueItems` added is breaking. Known limitation,
+  documented: a changed pattern is breaking whichever way it moved.
+
+### Fixes
+
+- **The authoring lint no longer mistakes `Listing<X | Y>?` for a union with a
+  nullable member.**
+- **The test loader reads a union of classes as the member whose properties the
+  document's keys are**, not the first class.
+- **Stale documentation.** The README and `docs/packaging.md` pinned `v0.1.0`,
+  said there were no consumers and no release workflow; they describe the current
+  state.
+
 ## v0.4.1 — 2026-10-04
 
 ### Fixes

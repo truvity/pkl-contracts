@@ -1,6 +1,7 @@
 /// Pkl's enforcement of the constraints a PROPERTY carries as an annotation
 /// (`@A.Range`, `@A.Length` on a property, narrowing the vocabulary type it
-/// has; `@A.DenyKeys`), and of the rules a CLASS or a MODULE carries across its
+/// has; `@A.DenyKeys`; `@A.Items` and `@A.Properties`, the count of a list and of
+/// a map), and of the rules a CLASS or a MODULE carries across its
 /// fields (`@A.RequiredWhen`, `@A.RequiredUnless`).
 ///
 /// Pkl has nowhere to put such a rule. A constraint belongs to a TYPE, and a type
@@ -90,6 +91,42 @@ local function denyProblems(a: Dynamic, x: Any, path: String): List<String> =
     .filter((k) -> x.toMap().containsKey(k))
     .map((k) -> "`\(path)` has the key `\(k)`, which its annotation refuses")
 
+local function itemsProblems(a: Dynamic, x: Any, path: String): List<String> =
+  let (items = if (x is Listing) x.toList() else x as List)
+    (
+      if (a.min != null && items.length < a.min)
+        List("`\(path)` has \(items.length) items, fewer than the \(a.min) its annotation requires")
+      else
+        List()
+    )
+      + (
+        if (a.max != null && items.length > a.max)
+          List("`\(path)` has \(items.length) items, more than the \(a.max) its annotation allows")
+        else
+          List()
+      )
+      + (
+        if (a.unique == true && items.distinct.length != items.length)
+          List("`\(path)` has an item more than once, and its annotation requires distinct items")
+        else
+          List()
+      )
+
+local function propertiesProblems(a: Dynamic, x: Any, path: String): List<String> =
+  let (n = (if (x is Map) x else x.toMap()).length)
+    (
+      if (a.min != null && n < a.min)
+        List("`\(path)` has \(n) entries, fewer than the \(a.min) its annotation requires")
+      else
+        List()
+    )
+      + (
+        if (a.max != null && n > a.max)
+          List("`\(path)` has \(n) entries, more than the \(a.max) its annotation allows")
+        else
+          List()
+      )
+
 /// What property `p`'s own annotations say is wrong with its value `x`.
 local function own(p: reflect.Property, x: Any, path: String): List<String> =
   if (x == null)
@@ -102,6 +139,10 @@ local function own(p: reflect.Property, x: Any, path: String): List<String> =
         lengthProblems(a.toDynamic(), x, path)
       else if (named(a, "DenyKeys") && (x is Mapping || x is Dynamic))
         denyProblems(a.toDynamic(), x, path)
+      else if (named(a, "Items") && (x is Listing || x is List))
+        itemsProblems(a.toDynamic(), x, path)
+      else if (named(a, "Properties") && (x is Mapping || x is Dynamic || x is Map))
+        propertiesProblems(a.toDynamic(), x, path)
       else
         List()
     )
@@ -184,7 +225,8 @@ local function join(path: String, name: String): String =
 
 /// Everything wrong in `v` and in the objects below it: one sentence for each
 /// property whose value is outside its `@Range` or `@Length`, has a key its
-/// `@DenyKeys` refuses, or each path a condition requires and finds absent.
+/// `@DenyKeys` refuses, has too few or too many items or entries or (`@Items`) an
+/// item twice, or each path a condition requires and finds absent.
 function problems(v: Any): List<String> = walk(v, "")
 
 /// `v` itself when no property's bound is broken; otherwise an error naming every

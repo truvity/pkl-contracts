@@ -4,7 +4,7 @@ config:
   listen:
     address: :8080
   postgres:
-    url: postgres://echo@db.example.com:5432/echo?sslmode=require
+    url: postgres://echo@db.example.com:5432/echo
     maxConnections: 10
   retention:
     days: 30

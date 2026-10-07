@@ -98,6 +98,99 @@ local function rangeProbes(n: Model.Node): List<Probe> =
       )
       + List(bad("a string for a number", "1"))
 
+/// Up to `count` distinct valid values of the type `n`, for the items of a list.
+/// Only the shapes a probe needs: an enum's members, whole numbers, strings that
+/// match the type's own examples (or plain ones), objects with one key.
+local function variants(n: Model.Node, count: Int): List<Any> =
+  if (n.kind == "enum")
+    n.values.take(count)
+  else if (n.kind == "integer" || n.kind == "number")
+    List(0, 1, 2, 3, 4, 5, 6, 7).take(count).map((i) -> sample(n) + i)
+  else if (n.kind == "open")
+    List(0, 1, 2, 3, 4, 5, 6, 7).take(count).map((i) -> new Dynamic { k = i })
+  else if (n.pattern != null)
+    n.pattern.valid.toList().take(count)
+  else
+    List("a", "b", "c", "d", "e", "f", "g", "h").take(count)
+
+/// `count` entries for a map or an open object, keyed `a`, `b`, ...
+local function entries(n: Model.Node, count: Int): Dynamic = new Dynamic {
+  for (k in List("a", "b", "c", "d", "e", "f", "g", "h").take(count)) {
+    [k] = if (n.kind == "map") sample(n.items) else 1
+  }
+}
+
+/// The probes of a list's count and distinctness (`@Items`).
+local function itemProbes(n: Model.Node): List<Probe> =
+  let (b = n.itemBounds)
+  let (most = (b.max ?? (b.min ?? 0) + 1) + 1)
+  let (pool = variants(n.items, most))
+  let (take = (k: Int) -> pool.take(k).toListing())
+  let (distinctEnough = (k: Int) -> pool.length >= k)
+    (
+      if (b.min != null && b.min > 0 && distinctEnough.apply(b.min))
+        List(ok("the fewest items", take.apply(b.min)))
+      else
+        List()
+    )
+      + (
+        if (b.min != null && b.min > 0 && distinctEnough.apply(b.min - 1))
+          List(bad("under the fewest items", take.apply(b.min - 1)))
+        else
+          List()
+      )
+      + (
+        if (b.max != null && distinctEnough.apply(b.max))
+          List(ok("the most items", take.apply(b.max)))
+        else
+          List()
+      )
+      + (
+        if (b.max != null && distinctEnough.apply(b.max + 1))
+          List(bad("over the most items", take.apply(b.max + 1)))
+        else if (b.max != null && b.unique != true)
+          List(bad("over the most items", List(pool.first).repeat(b.max + 1).toListing()))
+        else
+          List()
+      )
+      + (
+        if (b.min == null || b.min == 0)
+          List(ok("an empty list", new Listing {}))
+        else
+          List()
+      )
+      + (
+        if (b.unique == true && pool.length >= 2)
+          List(
+            ok("two distinct items", take.apply(2)),
+            bad("the same item twice", new Listing { pool.first; pool.first }),
+          )
+        else
+          List()
+      )
+
+/// The probes of a map's or an open object's count (`@Properties`).
+local function propertyProbes(n: Model.Node): List<Probe> =
+  let (b = n.propertyBounds)
+    (
+      if (b.min != null && b.min > 0)
+        List(
+          ok("the fewest entries", entries(n, b.min)),
+          bad("under the fewest entries", entries(n, b.min - 1)),
+        )
+      else
+        List(ok("no entries", entries(n, 0)))
+    )
+      + (
+        if (b.max != null)
+          List(
+            ok("the most entries", entries(n, b.max)),
+            bad("over the most entries", entries(n, b.max + 1)),
+          )
+        else
+          List()
+      )
+
 /// The probes of one property's type.
 function probesOf(n: Model.Node): List<Probe> =
   (
@@ -178,7 +271,34 @@ function probesOf(n: Model.Node): List<Probe> =
     )
     + (
       if (n.kind == "open" && n.requiresKeys == null)
-        List(ok("an empty object", new Dynamic {}), ok("any keys", new Dynamic { anything = 1 }))
+        (
+          if (n.propertyBounds?.min == null || n.propertyBounds.min == 0)
+            List(ok("an empty object", new Dynamic {}))
+          else
+            List()
+        )
+          + List(ok("any keys", new Dynamic { anything = 1 }))
+      else
+        List()
+    )
+    + (if (n.kind == "list" && n.itemBounds != null) itemProbes(n) else List())
+    + (
+      if ((n.kind == "map" || n.kind == "open") && n.propertyBounds != null)
+        propertyProbes(n)
+      else
+        List()
+    )
+    + (
+      if (n.kind == "list")
+        List(bad("a string for a list", "x"), bad("an object for a list", new Dynamic { a = 1 }))
+      else
+        List()
+    )
+    + (
+      if (n.notPatterns.length > 0)
+        n.notPatterns.flatMap((p) ->
+          p.invalid.toList().map((v) -> bad("refused by `\(p.reason)`", v))
+        )
       else
         List()
     )

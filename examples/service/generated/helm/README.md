@@ -60,7 +60,7 @@
 | `platform.config.pathEnv` | NonEmptyString |  | When set, the path is passed in this environment variable instead of an argument. |
 | `platform.configMap.annotations` | map of string |  | For a ConfigMap that must be a hook resource: a pre-install job cannot mount one the release has not created yet. |
 | `config.listen.address` | HostPort |  | **Required.** host:port, for example ":8080" or "127.0.0.1:8080". |
-| `config.postgres.url` | PostgresUrl |  | **Required.** A connection URL without credentials, for example postgres://user@host:5432/dbname?sslmode=require. |
+| `config.postgres.url` | PostgresUrl |  | **Required.** A connection URL without credentials, for example postgres://user@host:5432/dbname. It carries no password and no `sslmode` (or other TLS parameter): the password is named by `passwordEnv`, and transport security is the service's own setting. |
 | `config.postgres.passwordEnv` | NonEmptyString |  | The NAME of the environment variable holding the password. Unset means the connection needs none. |
 | `config.postgres.maxConnections` | PositiveInt | `10` | Pool size for this instance. Sized against the server's limit divided by the number of instances, not guessed. |
 | `config.retention.days` | PositiveInt | `7` | Days before it is deleted. |

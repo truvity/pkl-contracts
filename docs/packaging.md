@@ -20,9 +20,9 @@ by an HTTPS GET of `https://<host>/<path>@<version>` (the metadata), then of the
 and the version appears in the tag directory and after the `@`:
 
 ```
-package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.vocab@0.1.0
-   GET https://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.vocab@0.1.0
-   GET https://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.vocab@0.1.0.zip
+package://github.com/truvity/pkl-contracts/releases/download/v<version>/contracts.vocab@<version>
+   GET https://github.com/truvity/pkl-contracts/releases/download/v<version>/contracts.vocab@<version>
+   GET https://github.com/truvity/pkl-contracts/releases/download/v<version>/contracts.vocab@<version>.zip
 ```
 
 So `baseUri` is `package://github.com/truvity/pkl-contracts/releases/download/v<version>/<name>`
@@ -33,10 +33,10 @@ A release therefore carries thirty-six assets, four per package:
 
 | asset | what |
 |---|---|
-| `contracts.vocab@0.1.0` | the package metadata (JSON, no extension) |
-| `contracts.vocab@0.1.0.sha256` | its checksum |
-| `contracts.vocab@0.1.0.zip` | the package |
-| `contracts.vocab@0.1.0.zip.sha256` | its checksum |
+| `contracts.vocab@<version>` | the package metadata (JSON, no extension) |
+| `contracts.vocab@<version>.sha256` | its checksum |
+| `contracts.vocab@<version>.zip` | the package |
+| `contracts.vocab@<version>.zip.sha256` | its checksum |
 
 (and the same for every other package). This is the
 shape Pkl's own `pkl-go` publishes its `pkl.golang` package in, behind a
@@ -47,13 +47,13 @@ checksums in its `PklProject.deps.json`:
 
 ```pkl
 dependencies {
-  ["vocab"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.vocab@0.1.0" }
-  ["fragments"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.fragments@0.1.0" }
-  ["templates"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v0.1.0/contracts.templates@0.1.0" }
+  ["vocab"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v<version>/contracts.vocab@<version>" }
+  ["fragments"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v<version>/contracts.fragments@<version>" }
+  ["templates"] { uri = "package://github.com/truvity/pkl-contracts/releases/download/v<version>/contracts.templates@<version>" }
 }
 ```
 
-## How it is verified before a release exists
+## How it is verified before a release is published
 
 `just package` builds the packages with `pkl project package` exactly as a
 release will publish them (into `.out/`), and `hack/package-check.sh` checks
@@ -65,7 +65,7 @@ the one the metadata records. The zips are reproducible: the same sources give
 the same checksum.
 
 That the URIs resolve is proved by serving `.out/` from a local web server that
-answers `/truvity/pkl-contracts/releases/download/v0.1.0/<asset>` with a
+answers `/truvity/pkl-contracts/releases/download/v<version>/<asset>` with a
 redirect, as GitHub does, and pointing a consumer at it with
 `--http-rewrite https://github.com/=http://127.0.0.1:<port>/`: Pkl asks for
 the metadata and the zip at exactly the GitHub paths above, resolves the
@@ -80,28 +80,38 @@ cannot see a class that has one identity per package URI: a generator that
 recognised the vocabulary's annotations with `is` wrote nothing for such a
 consumer.
 
-## What a release needs, and what is not yet built
+## Releasing
 
-There is no `release.yaml` or `auto-release.yaml` yet. The shared
-`release-public.yaml` in `truvity/ci-workflows` runs goreleaser and publishes
-charts, neither of which is here, so a release workflow for this repository
-needs its own steps, on a tag `v*`:
+A release is two things in order: a pull request that names it, and a tag.
 
-1. refuse a tag that is not `v` and the version in `packages/Release.pkl`, and
-   one that has no `## vX.Y.Z` heading in the CHANGELOG (component contract C5);
-2. `just package`, which also runs the metadata check;
-3. create the GitHub release for the tag and upload the thirty-six assets in
-   `.out/` under their exact names (a name is part of the URI, so none may be
-   renamed or zipped again);
-4. smoke-test the published URIs: resolve a throwaway project that depends on
-   the three, and evaluate a module that imports them, against github.com itself;
-5. permissions `contents: write` only (the caller grants them: a reusable
-   workflow cannot widen them), and `concurrency` that never cancels a publish.
+1. **The heading pull request** changes `packages/Release.pkl` to the new version,
+   runs `just resolve` (every `PklProject.deps.json` records the version) and gives
+   `CHANGELOG.md` its `## vX.Y.Z` heading, in place of `## Unreleased`. While the
+   change is under review, `just compat` also accepts a breaking entry under that
+   heading.
+2. **The tag `vX.Y.Z`** on the commit that declares the version. Pushing it runs
+   `.github/workflows/release.yaml`, which calls the shared `release-pkl` workflow
+   of the organisation's CI repository: it refuses a tag that is not `v` and the
+   version in `packages/Release.pkl`, or that has no `## vX.Y.Z` heading in the
+   CHANGELOG; runs `just package` (which also runs the metadata check); creates the
+   GitHub release and uploads the thirty-six assets under their exact names (a name
+   is part of the URI, so none is renamed or zipped again); and resolves each
+   package from github.com itself, evaluating a module that imports the vocabulary,
+   the fragments and the templates, to prove a consumer can. Its token is
+   `contents: write` and nothing wider.
 
-Auto-release (a patch tag when only dependencies moved) stays off until a
-release has been cut by hand. Minors and majors are always manual. Moving the
-version is a pull request that changes `packages/Release.pkl`, runs
-`just resolve`, and adds the CHANGELOG heading.
+Between a release and the next, the packages differ from the tag's, and Pkl refuses
+to package a version already published with other contents. `just package` knows:
+while the declared version is released and `packages/` differs from its tag, the
+comparison is skipped and the CHANGELOG must say what is Unreleased instead. A change
+to a package therefore never bumps the version itself; the heading pull request does.
+
+Minors and majors are always cut by hand. The patch tag can be cut by
+`.github/workflows/auto-release.yaml` when merged changes have moved master past the
+latest release: it is off unless the repository variable `AUTO_RELEASE` is `true` and
+the token issuer is configured, it only ever cuts patches, and its heading pull
+request carries the version bump (`version-bump-command` rewrites
+`packages/Release.pkl` and re-resolves the projects).
 
 ## Pinning Pkl
 

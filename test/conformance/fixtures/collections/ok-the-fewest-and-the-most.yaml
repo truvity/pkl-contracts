@@ -1,0 +1,6 @@
+certificates: [x]
+names: [a, b]
+levels: [debug, info, warn]
+labels: {a: x}
+annotations: {a: b, c: d}
+selector: {a: 1, b: 2, c: 3}

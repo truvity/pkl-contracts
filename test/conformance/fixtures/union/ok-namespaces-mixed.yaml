@@ -1,0 +1,5 @@
+namespaces:
+  - team-a
+  - name: team-b
+    labels:
+      env: x

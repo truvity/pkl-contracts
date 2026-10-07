@@ -16,9 +16,14 @@
 ///   - an object closed that was open (`additionalProperties` or
 ///     `unevaluatedProperties` set to `false`), or a map's keys constrained
 ///     where they were free (`propertyNames` added, as `@DenyKeys` does);
+///   - items that must now be distinct (`uniqueItems` added);
 ///   - a pattern tightened: added where there was none, or changed. Whether one
 ///     regular expression is narrower than another is not decidable in general,
-///     so a changed pattern is reported as breaking and a reviewer overrules it;
+///     so a changed pattern is reported as breaking whichever way it moved, and a
+///     reviewer overrules it. This is a KNOWN LIMITATION: a pattern that was only
+///     widened (a unit added to a duration, say) is reported too, and the
+///     CHANGELOG entry that declares a break covers the report without saying
+///     which of the reported changes are real narrowings;
 ///   - an `anyOf` alternative that is no longer covered, an `allOf` that gained
 ///     a member, and a changed `if`, `then`, `else`, `not`, `const` or
 ///     `dependentRequired`, which are reported as breaking because they cannot
@@ -254,6 +259,15 @@ local function keywords(ctx: Ctx, path: String, b: Data, a: Data, seen: List<Str
       // ranges and lengths
       + lowerBounds.flatMap((k) -> bound(ctx, path, k, get(b, k), get(a, k), true))
       + upperBounds.flatMap((k) -> bound(ctx, path, k, get(b, k), get(a, k), false))
+      // distinct items
+      + (
+        if (get(a, "uniqueItems") == true && get(b, "uniqueItems") != true)
+          List(bad(ctx, path, "`uniqueItems` was added: the items must now be distinct"))
+        else if (get(b, "uniqueItems") == true && get(a, "uniqueItems") != true)
+          List(fine(ctx, path, "`uniqueItems` was removed"))
+        else
+          List()
+      )
       // pattern
       + (
         if (pa != null && pb == null)

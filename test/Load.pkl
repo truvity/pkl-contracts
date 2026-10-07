@@ -34,7 +34,8 @@ local function conv(v: Any, t: reflect.Type): Any =
     conv(v, t.member)
   else if (t is reflect.UnionType)
     // A union is read as the member whose shape the value has: a list as a
-    // Listing, an object as a Mapping or a class (Pkl's own check follows).
+    // Listing, an object as a Mapping or a class whose properties its keys are
+    // (Pkl's own check follows).
     let (m = t.members.findOrNull((m) -> shaped(v, m)))
       if (m == null) v else conv(v, m)
   else if (t is reflect.DeclaredType)
@@ -59,7 +60,10 @@ local function shaped(v: Any, t: reflect.Type): Boolean =
         else
           false
       else
+        // A class member of a union: an object whose keys the class has, so that a
+        // document of the second class is not read as the first.
         v is Dynamic
+          && v.toMap().keys.every((k) -> (r as reflect.Class).allProperties.containsKey(k))
   else
     false
 

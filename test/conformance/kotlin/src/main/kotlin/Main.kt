@@ -69,6 +69,7 @@ fun main(args: Array<String>) {
                     "shortener" -> cfg.to<Shortener>()
                     "installed" -> cfg.to<Installed>()
                     "blocks" -> cfg.to<Blocks>()
+                    "collections" -> cfg.to<Collections>()
                     "conditions" -> cfg.to<Conditions>()
                     "inherit" -> cfg.to<Inherit>()
                     "names" -> cfg.to<Names>()

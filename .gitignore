@@ -10,3 +10,6 @@
 # IDE
 .idea/
 .vscode/
+
+# `hack/compat.sh` generates a probe of the vocabulary here, and removes it
+/examples/service/.compat/

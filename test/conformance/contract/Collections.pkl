@@ -1,0 +1,50 @@
+/// Lists and maps with a count, lists of distinct items, and the vocabulary types
+/// built on them: what `minItems`, `maxItems`, `uniqueItems`, `minProperties` and
+/// `maxProperties` must mean to every validator, whether they sit on a property or
+/// on the items of a list, and a reference to a secret.
+@A.Schema { id = "https://example.com/schemas/collections.json"; title = "collections" }
+module conformance.contract.Collections
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// At least one certificate.
+@A.Items { min = 1 }
+certificates: Listing<V.NonEmptyString>?
+
+/// At most two names.
+@A.Items { max = 2 }
+names: Listing<V.NonEmptyString>?
+
+/// One to three distinct levels.
+@A.Items { min = 1; max = 3; unique = true }
+levels: Listing<V.LogLevel>?
+
+/// Ports, no two alike.
+@A.Items { unique = true }
+ports: Listing<V.Port>?
+
+/// Open objects, no two alike, whatever the order of their keys.
+@A.Items { unique = true }
+objects: Listing<V.OpenObject>?
+
+/// Each item is an object with at least one key.
+from: Listing<V.NonEmptyObject>?
+
+/// At least one label.
+@A.Properties { min = 1 }
+labels: Mapping<String, V.NonEmptyString>?
+
+/// At most two annotations.
+@A.Properties { max = 2 }
+annotations: Mapping<String, String>?
+
+/// An open object with one to three keys.
+@A.Properties { min = 1; max = 3 }
+selector: V.OpenObject?
+
+/// Where a password is, never the password.
+password: V.SecretRef?
+
+/// A connection URL with no credential in it.
+url: V.PostgresUrl?
