@@ -17,7 +17,7 @@ module contracts.Release
 import "pkl:Project"
 
 /// The repository-wide version.
-version = "0.6.0"
+version = "0.7.0"
 
 local repository = "truvity/pkl-contracts"
 
