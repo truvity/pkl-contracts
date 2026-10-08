@@ -730,3 +730,14 @@ typealias Mounted = Dynamic(hasProperty("name") && hasProperty("mountPath"))
 /// An open object with at least one key.
 @A.Properties { min = 1 }
 typealias NonEmptyObject = Dynamic(toMap().length >= 1)
+
+// ---------------------------------------------------------------- constants
+
+/// The boolean `false` and nothing else. Pkl has no boolean literal type
+/// (`false | Namespace` does not parse), and `Boolean | Namespace` would admit
+/// `true`. "False, or this object" is `(V.FalseOnly | Namespace)?`: JSON Schema
+/// `anyOf: [{ const: false }, <the object>]`, zod `z.union([z.literal(false), ...])`,
+/// pydantic `Literal[False] | Namespace`. A switch that means "off, and nothing
+/// else to say" beside an object that configures it.
+@A.Const { value = false }
+typealias FalseOnly = Boolean(this == false)

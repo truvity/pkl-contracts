@@ -94,16 +94,30 @@ local function named(a: Annotation, name: String): Boolean =
   let (c = reflect.Class(a.getClass()))
     c.name == name && c.enclosingDeclaration.name == "contracts.vocab.Annotations"
 
+/// Whether class `c`, or a class it extends, is annotated `@Open`.
+local function admitsUndeclared(c: reflect.Class): Boolean =
+  c.annotations.any((a) -> named(a, "Open"))
+    || (
+      c.superclass != null
+        && c.superclass.enclosingDeclaration.uri != "pkl:base"
+        && admitsUndeclared(c.superclass)
+    )
+
 local function typed(v: Any, c: reflect.Class): Any =
   if (v is Dynamic)
     let (props = c.allProperties.toMap().filter((_, p) -> !p.modifiers.contains("hidden")))
-    let (extra = v.toMap().keys.filter((k) -> !props.containsKey(k)))
+    // A class annotated `@Open` (or one that extends such a class) admits keys it
+    // does not declare: they are not read, and what they hold is not looked at. A
+    // typed Pkl object cannot hold them, so they are dropped here.
+    let (admitsOthers = admitsUndeclared(c))
+    let (extra = if (admitsOthers) List() else v.toMap().keys.filter((k) -> !props.containsKey(k)))
     let (
       nulls =
         v
           .toMap()
           .filter((k, e) ->
             e == null
+              && (props.containsKey(k) || !admitsOthers)
               && !(props.containsKey(k) && props[k].annotations.any((a) -> named(a, "Nullable")))
           )
           .keys
@@ -140,7 +154,8 @@ local function typed(v: Any, c: reflect.Class): Any =
       else
         v
           .toMap()
-          .mapValues((k, e) -> if (props.containsKey(k)) conv(e, props[k].type) else e)
+          .filter((k, _) -> props.containsKey(k))
+          .mapValues((k, e) -> conv(e, props[k].type))
           .toDynamic()
           .toTyped(c.reflectee)
   else

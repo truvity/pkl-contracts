@@ -36,6 +36,11 @@
 ///     writes its expressions in the subset the two share;
 ///   - a union is `X | Y`, which, like JSON Schema's `anyOf`, accepts a value that
 ///     is any member (see `JsonSchema`);
+///   - `@Open` is `extra="allow"` (the values of keys the class does not declare
+///     are left alone, `null` included), `@Const` a `Literal` (a strict `bool`, `int` or `float` with a membership check for a boolean or a number, because Python reads `0 == False`), and a rule across
+///     fields of any kind (`@ForbiddenWhen`, `@RequiredAnyOf`,
+///     `@RequiredWhenDiffers`) a statement of the class's `model_validator`; a map
+///     key's rules are the key alias's own (the `dict` is keyed by it);
 ///   - `@Nullable` is `| None` on the field, and the key is listed in the class's
 ///     `_nullable`, which the model validator above reads so that it does not
 ///     refuse that key's `null`; `@MultiLine` leaves out `_no_line_break` of its
@@ -210,7 +215,18 @@ local function listType(base: String, n: Model.Node): String =
     if (parts.isEmpty) base else "Annotated[\(base), \(parts.join(", "))]"
 
 local function inner(n: Model.Node): String =
-  if (n.kind == "string")
+  if (n.constant != null)
+    // Python reads `0 == False` and `1 == True`; a strict `bool` or `int` refuses
+    // the other type before the comparison, which a `Literal` does not.
+    if (n.kind == "string")
+      "Literal[\(lit(n.constant.value))]"
+    else if (n.kind == "boolean")
+      "Annotated[bool, AfterValidator(_one_of([\(lit(n.constant.value))]))]"
+    else if (n.kind == "integer")
+      "Annotated[int, BeforeValidator(_integral), AfterValidator(_one_of([\(lit(n.constant.value))]))]"
+    else
+      "Annotated[float, AfterValidator(_one_of([\(lit(n.constant.value))]))]"
+  else if (n.kind == "string")
     stringType(n)
   else if (n.kind == "integer")
     "Annotated[int, BeforeValidator(_integral)\(range(n))\(oneOf(n))]"
@@ -321,6 +337,39 @@ local function classDef(c: Model.Cls): String =
   else
     classBody(c)
 
+/// A path as a list of attribute names.
+local function pyPath(p: List<String>): String = lit(p.map((k) -> pyName(k)))
+
+/// The test of a rule (`@RequiredWhen` and the others) on the value at its path:
+/// the value is one of those listed, or, for `contains`, a list holding one.
+local function holds(d: Model.Condition, negate: Boolean): String =
+  if (d.`test` == "contains")
+    "\(if (negate) "not " else "")any(x in \(lit(d.`values`)) for x in (_at(self, \(pyPath(d.path))) or []))"
+  else
+    "_at(self, \(pyPath(d.path))) \(if (negate) "not in" else "in") \(lit(d.`values`))"
+
+/// The statements of one rule, inside the class's `model_validator`.
+local function ruleStatements(owner: String, d: Model.Condition): String =
+  if (d.kind == "anyOf")
+    "        if all(_at(self, p) is None for p in \(lit(d.paths.map((p) -> p.map((k) -> pyName(k)))))):\n"
+      + "            raise ValueError(\(lit(Model.conditionPhrase(d))))\n"
+  else if (d.kind == "differs")
+    "        _ref = _at(self, \(pyPath(d.path)))\n"
+      + "        if _ref is not None:\n"
+      + "            for _name, _entry in (_at(self, \(pyPath(d.eachPath))) or {}).items():\n"
+      + "                _v = _at(_entry, \(pyPath(d.entryPath)))\n"
+      + "                if _v is None or _v == _ref:\n"
+      + "                    continue\n"
+      + "                missing = [\".\".join(p) for p in \(lit(d.paths.map((p) -> p.map((k) -> pyName(k))))) if _at(_entry, p) is None]\n"
+      + "                if missing:\n"
+      + "                    raise ValueError(\(lit(Model.conditionPhrase(d) + ": ")) + _name + \" is missing \" + \", \".join(missing))\n"
+  else
+    let (isForbid = d.kind == "forbid")
+      "        if \(holds(d, d.unless)):\n"
+        + "            \(if (isForbid) "present" else "missing") = [\".\".join(p) for p in \(lit(d.paths.map((p) -> p.map((k) -> pyName(k))))) if _at(self, p) is \(if (isForbid) "not " else "")None]\n"
+        + "            if \(if (isForbid) "present" else "missing"):\n"
+        + "                raise ValueError(\(lit(Model.conditionPhrase(d) + (if (isForbid) ": present " else ": missing "))) + \", \".join(\(if (isForbid) "present" else "missing")))\n"
+
 /// The `model_validator` of one class (or alias) for its rules across fields, or
 /// nothing. Named for `owner`: a subclass's validator must not replace its base's.
 local function conditional(owner: String, conds: List<Model.Condition>): String =
@@ -329,14 +378,7 @@ local function conditional(owner: String, conds: List<Model.Condition>): String 
   else
     "\n    @model_validator(mode=\"after\")\n"
       + "    def _conditional_\(owner)(self) -> \"\(owner)\":\n"
-      + conds
-        .map((d) ->
-          "        if _at(self, \(lit(d.path.map((k) -> pyName(k))))) \(if (d.unless) "not in" else "in") \(lit(d.values)):\n"
-            + "            missing = [\".\".join(p) for p in \(lit(d.paths.map((p) -> p.map((k) -> pyName(k))))) if _at(self, p) is None]\n"
-            + "            if missing:\n"
-            + "                raise ValueError(\(lit(Model.conditionPhrase(d) + ": missing ")) + \", \".join(missing))\n"
-        )
-        .join("")
+      + conds.map((d) -> ruleStatements(owner, d)).join("")
       + "        return self\n"
 
 /// The keys of `c` that admit `null` (`@Nullable`), added to the ones its base
@@ -364,7 +406,7 @@ local function classBody(c: Model.Cls): String =
         ""
     )
     + (
-      if (c.isOpen)
+      if (c.isOpen || c.undeclaredKeys)
         "    model_config = ConfigDict(extra=\"allow\")\n"
       else if (c.base != null)
         "    model_config = ConfigDict(extra=\"forbid\")\n"
@@ -497,10 +539,33 @@ local header: String =
 
   """#
 
+/// The header for a contract with a class that admits undeclared keys: the base
+/// model's "null is not a value" check skips the keys the class does not declare.
+local openHeader: String =
+  header.replaceAll(
+    #"""
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if value is None and key not in cls._nullable:
+    """#,
+    #"""
+            if isinstance(data, dict):
+                declared = {f.alias or name for name, f in cls.model_fields.items()}
+                admits_others = cls.model_config.get("extra") == "allow"
+                for key, value in data.items():
+                    if admits_others and key not in declared:
+                        continue
+                    if value is None and key not in cls._nullable:
+    """#,
+  )
+
 /// The Python module for the documents in `roots`.
 function render(roots: Mapping<String, Model.Node>): String =
   let (ns = roots.toMap().values.toList())
-    header
+    // A class that admits undeclared keys (`@Open`) leaves their values alone, `null`
+    // included; the check is added to the base model only when a contract has one,
+    // so that every other contract generates exactly what it did.
+    (if (Model.classes(ns).any((c) -> c.cls.undeclaredKeys)) openHeader else header)
       + Model.aliases(ns).map((a) -> "\(a.alias) = \(inner(a))\n").join("")
       + "\n\n"
       + Model.classes(ns).map((c) -> classDef(c.cls)).join("")

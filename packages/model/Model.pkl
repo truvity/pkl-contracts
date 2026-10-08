@@ -73,15 +73,33 @@ class Node {
   /// class or the module itself are `Cls.conditions`.
   conditions: List<Dynamic> = List()
   chart: Dynamic?
+  /// The one value the node may be (`@Const`), as data with `value`, or null.
+  constant: Dynamic?
 }
 
-/// A rule across fields, read from `@RequiredWhen` or `@RequiredUnless` and
-/// resolved against the class it is written on, so that a generator can rely on
-/// every path existing. A `Dynamic` with: `unless` (Boolean: `@RequiredUnless`),
-/// `property` (the dotted path that decides), `path` (the same, as a list of
-/// names), `values` (what the property may be: strings for an enum, booleans for
-/// a boolean) and `require` (the dotted paths that must be present), `paths` (the
-/// same, each as a list of names).
+/// A rule across fields, read from `@RequiredWhen`, `@RequiredUnless`,
+/// `@ForbiddenWhen`, `@ForbiddenUnless`, `@RequiredAnyOf` or `@RequiredWhenDiffers`
+/// and resolved against the class it is written on, so that a generator can rely
+/// on every path existing. A `Dynamic` with:
+///
+///   - `kind`: `require` (`@RequiredWhen`, `@RequiredUnless`), `forbid`
+///     (`@ForbiddenWhen`, `@ForbiddenUnless`), `anyOf` (`@RequiredAnyOf`) or
+///     `differs` (`@RequiredWhenDiffers`);
+///   - `unless` (Boolean: the `Unless` spelling of `require` and `forbid`; false
+///     for the others);
+///   - `test`, for `require` and `forbid`: `in` (the value is one of `values`) or
+///     `contains` (the list holds one of `values`);
+///   - `property` (the dotted path that decides), `path` (the same, as a list of
+///     names), `values` (what the condition lists; for `differs`, every value the
+///     reference may be: the enum's members, or `true` and `false`);
+///   - `require` (the dotted paths the rule is about: required, forbidden, or the
+///     alternatives of `anyOf`; below the entry for `differs`) and `paths` (the
+///     same, each as a list of names);
+///   - for `differs` also `each` and `eachPath` (the map), `entryProperty` and
+///     `entryPath` (the value compared, below an entry).
+///
+/// An old vocabulary has only `require`; its rules have no `kind` in the
+/// annotation, so the model gives them `require` and `in`.
 typealias Condition = Dynamic
 
 class Prop {
@@ -126,6 +144,9 @@ class Cls {
   props: List<Prop>
   /// `open` in Pkl: another document extends it, so it must not close itself.
   isOpen: Boolean = false
+  /// It admits keys it does not declare (`@Open`): its typed properties are
+  /// checked, and the object is not closed.
+  undeclaredKeys: Boolean = false
   /// The documented class this one extends (allOf), if any.
   base: Node?
   /// The rules across fields written on this class, or on the module it is, and
@@ -190,6 +211,7 @@ local function annots(a: List<Annotation>): Dynamic = new Dynamic {
       .map((x) -> x.toDynamic())
   multiLine = find(a, "MultiLine") != null
   oneOf = find(a, "OneOfValues")
+  constant = find(a, "Const")
 }
 
 /// The values of a `@OneOfValues` as the numbers of a node of kind `kind`, or an
@@ -206,9 +228,28 @@ local function numbersOf(where: String, kind: String, vs: List<Number>): List<Nu
   else
     vs.distinct
 
+/// The value of a `@Const` as the constant of a node of kind `kind`, or an error:
+/// the value must be what the type is.
+local function constantOf(where: String, kind: String, v: Any): Dynamic =
+  if (kind == "boolean" && v is Boolean)
+    new Dynamic { value = v }
+  else if (kind == "string" && v is String)
+    new Dynamic { value = v }
+  else if (kind == "integer" && v is Number && v == v.truncate())
+    new Dynamic { value = v.toInt() }
+  else if (kind == "number" && v is Number)
+    new Dynamic { value = v }
+  else
+    throw(
+      "\(where): @Const is the one value of a boolean, a string or a number, and its value must be that type (this is \(kind), and the value is \(literal(v)))"
+    )
+
 local function withAnnots(n: Node, a: List<Annotation>, adoc: String?, aalias: String?): Node =
   let (x = annots(a))
     (n) {
+      when (x.constant != null) {
+        constant = constantOf(aalias ?? "a type", n.kind, x.constant.value)
+      }
       when (aalias != null) { alias = aalias }
       when (adoc != null && n.doc == null) { doc = adoc }
       when (x.schema != null) { schema = x.schema }
@@ -285,13 +326,51 @@ local function base(name: String, t: reflect.DeclaredType): Node =
   else if (name == "Listing" || name == "List")
     new Node { kind = "list"; items = nodeOf(t.typeArguments[0]) }
   else if (name == "Mapping" || name == "Map")
-    new Node { kind = "map"; key = nodeOf(t.typeArguments[0]); items = nodeOf(t.typeArguments[1]) }
+    new Node { kind = "map"; key = keyOf(t.typeArguments[0]); items = nodeOf(t.typeArguments[1]) }
   else if (name == "Dynamic")
     new Node { kind = "open" }
   else if (name == "Any")
     new Node { kind = "any" }
   else
     throw("Model: unsupported standard type \(name)")
+
+/// The type of a map's keys. A key is a string in a document, and what a schema
+/// can say of one is a string's: `@Pattern`, `@NotPattern`, `@Length`, `@Format`,
+/// `@MultiLine`, or an enum (and a union of those). The generators write all of
+/// that into `propertyNames`; an annotation they could not write is refused here,
+/// where it would otherwise be accepted and dropped, and the schema would admit a
+/// key the contract refuses.
+local function keyOf(t: reflect.Type): Node = keyChecked(nodeOf(t))
+
+local function keyChecked(k: Node): Node =
+  let (where = "the key type \(k.alias ?? k.kind) of a map")
+  let (
+    unsupported =
+      List(
+        if (k.range != null) "@Range" else null,
+        if (k.numericValues != null) "@OneOfValues" else null,
+        if (k.itemBounds != null) "@Items" else null,
+        if (k.propertyBounds != null) "@Properties" else null,
+        if (k.requiresKeys != null) "@RequiresKeys" else null,
+        if (k.denyKeys != null) "@DenyKeys" else null,
+        if (k.constant != null) "@Const" else null,
+        if (k.schema != null) "@Schema" else null,
+        if (k.chart != null) "@Chart" else null,
+        if (!k.conditions.isEmpty) "a rule across fields" else null,
+      ).filterNonNull()
+  )
+    if (!unsupported.isEmpty)
+      throw(
+        "\(where) carries \(unsupported.join(", ")), which a key cannot render (a schema can say of a key what it can of a string: a pattern, a length, a format, an enum); it would be dropped"
+      )
+    else if (k.kind == "union")
+      (k) { members = k.members.map((m) -> keyChecked(m)) }
+    else if (k.kind == "string" || k.kind == "enum" || k.kind == "any")
+      k
+    else
+      throw(
+        "\(where) is \(k.kind): a key of a document is a string, so a map is keyed by a string, an enum or a union of those"
+      )
 
 local function isScalarish(n: Node): Boolean =
   !(n.kind == "object" || n.kind == "open" || n.kind == "any")
@@ -457,6 +536,9 @@ local function narrowed(where: String, n: Node, a: List<Annotation>): Node =
     else
       (n) {
         alias = null
+        // No longer the alias's `@Def` either: a `$ref` to the definition would
+        // lose the property's own bound.
+        def = null
         aliasBase = n.alias ?? n.aliasBase
         when (r != null) { range = narrowerRange(where, n.range, r) }
         when (l != null) { length = narrower(where, n.length, l) }
@@ -564,12 +646,22 @@ local function propOf(where: String, pname: String, p: reflect.Property): Prop =
   let (atInstall = find(p.annotations, "SetAtInstall") != null)
   let (onlyRequired = find(p.annotations, "Required") != null)
   let (acceptsNull = find(p.annotations, "Nullable") != null)
+  let (
+    misplaced =
+      (List("Open", "Const") + ruleNames).findOrNull((name) ->
+        p.annotations.any((x) -> named(x, name))
+      )
+  )
   let (explicit = !isScalarish(n) && explicitObject(p, n))
   let (own = if (isScalarish(n)) defaultOf(p, n) != null else explicit)
   let (isBare = !atInstall && !onlyRequired && !nullable && !own)
   let (implicitObject = isBare && defaultComplete(n, List()))
     if (nullableMember(p.type))
       throw(nullableMemberMessage(here))
+    else if (misplaced != null)
+      throw(
+        "\(here): @\(misplaced) is for \(if (misplaced == "Const") "an alias" else if (misplaced == "Open") "a class or a module" else "a class, a module or an alias of a class"), not a property: on a property it would be dropped"
+      )
     else if (atInstall && onlyRequired)
       throw(
         "\(here): @SetAtInstall and @Required say the same thing; use one (SetAtInstall for a value only an install can give)"
@@ -676,73 +768,227 @@ local function checkWay(where: String, ps: List<Prop>, full: String): Boolean =
         )
     )
 
-/// One rule across fields, resolved against `c`, or an error saying what is
-/// wrong with it.
-local function condition(where: String, c: Cls, a: Dynamic, isUnless: Boolean): Condition =
-  let (kind = if (isUnless) "@RequiredUnless" else "@RequiredWhen")
-  let (here = "\(where) \(kind)")
-  let (vals = a.`in`.toList())
+/// The `in` and `contains` of a rule's annotation as the test it makes and the
+/// values it lists. An annotation of an old vocabulary has no `contains`.
+local function testOf(here: String, a: Dynamic): Pair<String, List<Any>> =
+  let (inVals = a.`in`.toList())
+  let (containsVals = (a.getPropertyOrNull("contains") ?? new Listing {}).toList())
+    if (!inVals.isEmpty && !containsVals.isEmpty)
+      throw("\(here): `in` and `contains` are two conditions; give one")
+    else if (inVals.isEmpty && containsVals.isEmpty)
+      throw("\(here): `in` names no value (and `contains` none)")
+    else if (inVals.isEmpty)
+      Pair("contains", containsVals)
+    else
+      Pair("in", inVals)
+
+/// The paths of a rule (`require` or `forbid`), each resolved in `c` and held to
+/// the limits of a path a schema validator and Pkl must read alike: a property
+/// with no default of its own (Pkl would find it always there), on a way of
+/// blocks with none.
+local function resolvePaths(
+  here: String,
+  c: Cls,
+  names: List<String>,
+  what: String,
+): List<List<String>> =
+  names.map((r) ->
+    let (rs = r.split("."))
+    let (rway = hops(here, c, rs, r))
+      if (!checkWay(here, rway, r))
+        throw("unreachable")
+      else if (rway.last.hasDefault)
+        throw(
+          "\(here): `\(r)` has a default, so it is always present to Pkl and never \(what) of a document; a path of a rule is a property with none (nullable, or set at install)"
+        )
+      else
+        rs
+  )
+
+/// The leaf a rule's condition reads, checked against the test it makes and the
+/// values it lists.
+local function checkCondition(
+  here: String,
+  property: String,
+  leaf: Prop,
+  test: String,
+  vals: List<Any>,
+): Boolean =
+  let (domain = if (test == "contains") leaf.type.items else leaf.type)
+    if (test == "contains" && leaf.type.kind != "list")
+      throw(
+        "\(here): `\(property)` is \(typeLabel(leaf.type)); `contains` is a condition on a list"
+      )
+    else if (domain.kind != "boolean" && domain.kind != "enum")
+      throw(
+        "\(here): `\(property)` is \(typeLabel(leaf.type)); a condition is on a boolean or an enum\(if (test == "contains") " (or a list of them)" else "")"
+      )
+    else if (domain.kind == "boolean" && !vals.every((v) -> v is Boolean))
+      throw("\(here): `\(property)` is a boolean, so the condition lists booleans")
+    else if (domain.kind == "enum" && !vals.every((v) -> v is String && domain.values.contains(v)))
+      throw(
+        "\(here): the condition lists a value `\(property)` cannot hold (it is one of \(domain.values.map((v) -> "`\(v)`").join(", ")))"
+      )
+    else if (
+      leaf.hasDefault
+        && (
+          if (test == "contains")
+            (leaf.default as List).any((d) -> vals.contains(d))
+          else
+            vals.contains(leaf.default)
+        )
+    )
+      throw(
+        "\(here): `\(property)` defaults to \(literal(leaf.default)), a value of the condition: a document that leaves it out means one thing to Pkl and another to a schema validator, which fills no default in"
+      )
+    else
+      true
+
+/// A rule `@RequiredWhen`, `@RequiredUnless`, `@ForbiddenWhen` or
+/// `@ForbiddenUnless`, resolved against `c`, or an error saying what is wrong
+/// with it.
+local function condition(where: String, c: Cls, a: Dynamic, kindName: String): Condition =
+  let (isUnless = kindName.endsWith("Unless"))
+  let (isForbid = kindName.startsWith("Forbidden"))
+  let (here = "\(where) @\(kindName)")
+  let (how = testOf(here, a))
+  let (names = (if (isForbid) a.forbid else a.require).toList())
   let (segments = a.property.split("."))
   let (way = hops(here, c, segments, a.property))
   let (leaf = way.last)
-  let (
-    resolved =
-      a.require
-        .toList()
-        .map((r) ->
-          let (rs = r.split("."))
-          let (rway = hops(here, c, rs, r))
-            if (!checkWay(here, rway, r))
-              throw("unreachable")
-            else if (rway.last.hasDefault)
-              throw(
-                "\(here): `\(r)` has a default, so it is always present to Pkl and never required of a document; a required path is a property with none (nullable, or set at install)"
-              )
-            else
-              rs
-        )
-  )
-    if (a.require.toList().isEmpty)
-      throw("\(here): `require` names nothing")
-    else if (vals.isEmpty)
-      throw("\(here): `in` names no value")
+  let (resolved = resolvePaths(here, c, names, if (isForbid) "forbidden" else "required"))
+    if (names.isEmpty)
+      throw("\(here): `\(if (isForbid) "forbid" else "require")` names nothing")
     else if (!checkWay(here, way, a.property) || resolved.length < 0)
       throw("unreachable")
-    else if (leaf.type.kind != "boolean" && leaf.type.kind != "enum")
-      throw(
-        "\(here): `\(a.property)` is \(typeLabel(leaf.type)); a condition is on a boolean or an enum"
-      )
-    else if (leaf.type.kind == "boolean" && !vals.every((v) -> v is Boolean))
-      throw("\(here): `\(a.property)` is a boolean, so `in` lists booleans")
-    else if (
-      leaf.type.kind == "enum"
-        && !vals.every((v) -> v is String && leaf.type.values.contains(v))
-    )
-      throw(
-        "\(here): `in` has a value `\(a.property)` cannot hold (it is one of \(leaf.type.values.map((v) -> "`\(v)`").join(", ")))"
-      )
-    else if (leaf.hasDefault && vals.contains(leaf.default))
-      throw(
-        "\(here): `\(a.property)` defaults to \(literal(leaf.default)), a value of `in`: a document that leaves it out means one thing to Pkl and another to a schema validator, which fills no default in"
-      )
+    else if (!checkCondition(here, a.property, leaf, how.first, how.second))
+      throw("unreachable")
     else
       new Dynamic {
+        kind = if (isForbid) "forbid" else "require"
         unless = isUnless
+        `test` = how.first
         property = a.property
         path = segments
-        `values` = vals
-        require = a.require.toList()
+        `values` = how.second
+        require = names
         paths = resolved
       }
 
+/// A rule `@RequiredAnyOf`.
+local function anyOfRule(where: String, c: Cls, a: Dynamic): Condition =
+  let (here = "\(where) @RequiredAnyOf")
+  let (names = a.paths.toList())
+    if (names.length < 2)
+      throw("\(here): at least two paths (one would be `@Required`)")
+    else if (names.distinct.length != names.length)
+      throw("\(here): a path is listed twice")
+    else
+      let (resolved = resolvePaths(here, c, names, "required"))
+        if (resolved.length < 1)
+          throw("unreachable")
+        else
+          new Dynamic {
+            kind = "anyOf"
+            unless = false
+            require = names
+            paths = resolved
+          }
+
+/// A rule `@RequiredWhenDiffers`.
+local function differsRule(where: String, c: Cls, a: Dynamic): Condition =
+  let (here = "\(where) @RequiredWhenDiffers")
+  let (segments = a.property.split("."))
+  let (way = hops(here, c, segments, a.property))
+  let (eachSegments = a.each.split("."))
+  let (eachWay = hops(here, c, eachSegments, a.each))
+  let (collection = eachWay.last)
+  let (names = a.require.toList())
+  let (entryName = a.entryProperty)
+    if (names.isEmpty)
+      throw("\(here): `require` names nothing")
+    else if (!checkWay(here, way, a.property) || !checkWay(here, eachWay, a.each))
+      throw("unreachable")
+    else if (collection.type.kind != "map" || collection.type.items.kind != "object")
+      throw(
+        "\(here): `\(a.each)` is \(typeLabel(collection.type)); `each` is a map of a class, whose entries the rule reads"
+      )
+    else if (collection.hasDefault && !(collection.default as Map).isEmpty)
+      throw(
+        "\(here): `\(a.each)` has a default with entries: Pkl would hold them to the rule and a schema validator, which fills no default in, would not"
+      )
+    else
+      let (entry = collection.type.items.cls)
+      let (entryWay = hops(here, entry, entryName.split("."), entryName))
+      let (reference = way.last)
+      let (compared = entryWay.last)
+      let (
+        domain =
+          if (reference.type.kind == "boolean")
+            List(true, false)
+          else if (reference.type.kind == "enum")
+            reference.type.values
+          else
+            throw(
+              "\(here): `\(a.property)` is \(typeLabel(reference.type)); the reference of a comparison is a boolean or an enum"
+            )
+      )
+        if (compared.type.kind != reference.type.kind)
+          throw(
+            "\(here): `\(a.property)` is \(typeLabel(reference.type)) and the entries' `\(entryName)` is \(typeLabel(compared.type)); they are compared, so they are the same kind of value"
+          )
+        else if (reference.hasDefault)
+          throw(
+            "\(here): `\(a.property)` has a default, so it is always set to Pkl and never to a schema validator, which fills no default in; the reference has none (nullable)"
+          )
+        else if (compared.hasDefault || !checkWay(here, entryWay, entryName))
+          throw(
+            "\(here): the entries' `\(entryName)` has a default (or goes through a block that has one): Pkl would find it set where a schema validator would not"
+          )
+        else if (resolvePaths(here, entry, names, "required").length < 1)
+          throw("unreachable")
+        else
+          new Dynamic {
+            kind = "differs"
+            unless = false
+            property = a.property
+            path = segments
+            `values` = domain
+            each = a.each
+            eachPath = eachSegments
+            entryProperty = entryName
+            entryPath = entryName.split(".")
+            require = names
+            paths = resolvePaths(here, entry, names, "required")
+          }
+
+/// The rule annotations, in the order their rules are listed in a schema.
+local const ruleNames: List<String> =
+  List(
+    "RequiredWhen",
+    "RequiredUnless",
+    "ForbiddenWhen",
+    "ForbiddenUnless",
+    "RequiredAnyOf",
+    "RequiredWhenDiffers",
+  )
+
+local function isRule(x: Annotation): Boolean = ruleNames.any((n) -> named(x, n))
+
 /// The conditions written in annotations `a`, resolved against `c`.
 local function conditionsOf(where: String, c: Cls, a: List<Annotation>): List<Condition> =
-  a
-    .filter((x) -> named(x, "RequiredWhen"))
-    .map((x) -> condition(where, c, x.toDynamic(), false))
-    + a
-      .filter((x) -> named(x, "RequiredUnless"))
-      .map((x) -> condition(where, c, x.toDynamic(), true))
+  ruleNames.flatMap((name) ->
+    a
+      .filter((x) -> named(x, name))
+      .map((x) ->
+        if (name == "RequiredAnyOf")
+          anyOfRule(where, c, x.toDynamic())
+        else if (name == "RequiredWhenDiffers")
+          differsRule(where, c, x.toDynamic())
+        else
+          condition(where, c, x.toDynamic(), name)
+      )
+  )
 
 /// The annotations of class `c` and of the classes it inherits that are not
 /// documents of their own (what `inherited` folds into it).
@@ -763,7 +1009,7 @@ local function conditionAnnotations(c: reflect.Class): List<Annotation> =
 /// `n`, an alias's node, with the rules the alias carries. Only an alias of a
 /// class can carry one.
 local function withAliasConditions(name: String, n: Node, a: List<Annotation>): Node =
-  let (annotated = a.any((x) -> named(x, "RequiredWhen") || named(x, "RequiredUnless")))
+  let (annotated = a.any((x) -> isRule(x)))
     if (!annotated)
       n
     else if (n.kind != "object")
@@ -779,6 +1025,7 @@ local function classOf(c: reflect.Class): Cls =
       qname = qualify(short(mod.name), c.name)
       doc = c.docComment
       props = propsOf(c.name, inherited(c) + c.properties.toMap())
+      undeclaredKeys = conditionAnnotations(c).any((x) -> named(x, "Open"))
       when (
         sup != null
           && sup.enclosingDeclaration.uri != "pkl:base"
@@ -808,6 +1055,7 @@ local function fromMirror(mm: reflect.Module): Node =
           if (hasBase) mm.moduleClass.properties else mm.moduleClass.allProperties,
         )
       isOpen = mm.modifiers.contains("open")
+      undeclaredKeys = mm.annotations.any((x) -> named(x, "Open"))
       when (hasBase) { base = fromMirror(sup) }
     }
   )
@@ -1044,12 +1292,19 @@ local function rangePhrase(r: Dynamic): String =
 
 /// A rule across fields in words.
 function conditionPhrase(d: Condition): String =
-  let (vs = d.values.map((v) -> "`\(v)`").join(" or "))
   let (need = d.require.map((k) -> "`\(k)`").join(", "))
-    if (d.unless)
-      "unless `\(d.property)` is \(vs), \(need) are required"
+    if (d.kind == "anyOf")
+      "at least one of \(need) is required"
+    else if (d.kind == "differs")
+      "for every entry of `\(d.each)` whose `\(d.entryProperty)` differs from `\(d.property)`, \(need) are required"
     else
-      "when `\(d.property)` is \(vs), \(need) are required"
+      let (vs = d.values.map((v) -> "`\(v)`").join(" or "))
+      let (what = if (d.kind == "forbid") "not allowed" else "required")
+      let (holds = if (d.`test` == "contains") "contains" else "is")
+        if (d.unless)
+          "unless `\(d.property)` \(holds) \(vs), \(need) are \(what)"
+        else
+          "when `\(d.property)` \(holds) \(vs), \(need) are \(what)"
 
 /// A bound on a count in words, `one` and `many` being the noun in the singular
 /// and in the plural.
@@ -1094,6 +1349,7 @@ function constraintsOf(n: Node): List<String> =
       else
         List("one of \(n.numericValues.map((v) -> "\(v)").join(", "))")
     )
+    + (if (n.constant == null) List() else List("always `\(n.constant.value)`"))
     + n.notPatterns.map((p) -> "must not match `\(p.regex)` (\(p.reason))")
     + (if (n.itemBounds == null) List() else countPhrases(n.itemBounds, "item", "items"))
     + (

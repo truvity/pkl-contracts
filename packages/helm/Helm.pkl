@@ -33,7 +33,7 @@ function valuesSchema(root: Model.Node): Dynamic =
       ["$schema"] = JsonSchema.schemaUri
       title = root.chart.title
       when (root.cls.doc != null) { description = root.cls.doc }
-      ...JsonSchema.objectBody(root.cls, "additionalProperties")
+      ...JsonSchema.objectBody(root.cls, JsonSchema.closer(root.cls))
       when (!JsonSchema.conditions(root.cls).isEmpty) {
         allOf = JsonSchema.conditions(root.cls)
       }

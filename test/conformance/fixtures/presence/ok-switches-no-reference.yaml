@@ -1,0 +1,4 @@
+owner: o
+switches:
+  items:
+    a: {setting: true}

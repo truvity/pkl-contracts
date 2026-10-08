@@ -17,14 +17,31 @@ import "conformance/contract/Blocks.pkl"
 import "conformance/contract/Collections.pkl"
 import "conformance/contract/Conditions.pkl"
 import "conformance/contract/Declared.pkl"
+import "conformance/contract/Keys.pkl"
 import "conformance/contract/Literals.pkl"
 import "conformance/contract/Names.pkl"
+import "conformance/contract/Presence.pkl"
+import "conformance/contract/Resource.pkl"
 import "conformance/union/Union.pkl"
 import "PlainChart.pkl"
 import "Showcase.pkl"
 
 local docs =
-  Model.documents(List(Blocks, Collections, Conditions, Declared, Literals, Names, Showcase, Union))
+  Model.documents(
+    List(
+      Blocks,
+      Collections,
+      Conditions,
+      Declared,
+      Keys,
+      Literals,
+      Names,
+      Presence,
+      Resource,
+      Showcase,
+      Union,
+    ),
+  )
 local zod = Zod.render(docs)
 local py = Pydantic.render(docs)
 local reference = Docs.render(docs)
@@ -64,6 +81,97 @@ facts {
     zod.contains("z.partialRecord(LogLevel, PositiveInt)")
     schema("literals").properties["levels"].propertyNames.`enum`
       == List("debug", "info", "warn", "error")
+  }
+  ["every rule of a key type is in propertyNames: the pattern, what it must not match, the length"] {
+    local names = schema("keys").properties["priorityClasses"].propertyNames
+    names.pattern == "^[a-z0-9][-a-z0-9]*$"
+    names.not.pattern.contains("\\n")
+    names.allOf.length == 1
+    names.allOf.first.not.pattern == "^system-"
+    local ns = schema("keys").properties["namespaces"].propertyNames
+    ns.maxLength == 63
+    ns.pattern.contains("a-z0-9")
+    !ns.toMap().containsKey("minLength")
+    local codes = schema("keys").properties["codes"].propertyNames
+    codes.minLength == 2
+    codes.maxLength == 4
+    // A plain string key says nothing, and an enum key is its members.
+    !schema("collections").properties["labels"].toMap().containsKey("propertyNames")
+    // zod and pydantic refer to the key alias, which carries the rules.
+    zod.contains("z.record(PriorityName, NonEmptyString)")
+    py.contains("dict[PriorityName, NonEmptyString]")
+    zod.contains(#"export const PriorityName = z.string().regex(/^[a-z0-9][-a-z0-9]*$/)"#)
+    zod.contains("the prefix `system-` is reserved")
+  }
+  ["a class annotated @Open is not closed in any generator, and the closed ones beside it are"] {
+    local spec = schema("resource").properties["spec"]
+    !spec.toMap().containsKey("additionalProperties")
+    !spec.toMap().containsKey("unevaluatedProperties")
+    spec.required == List("instances")
+    spec.properties["instances"].minItems == 1
+    !spec.properties["instances"].items.toMap().containsKey("additionalProperties")
+    spec.properties["instances"].items.required == List("name", "asn")
+    spec.properties["instances"].items.properties["asn"].maximum == 4294967295
+    schema("resource").properties["settings"]["additionalProperties"] == false
+    schema("resource")["additionalProperties"] == false
+    !schema("resource").properties["spec"].toMap().containsKey("additionalProperties")
+    zod.contains("export const ResourceSpec = z.looseObject(ResourceSpec_shape);")
+    zod.contains("export const ResourceSettings = z.strictObject(ResourceSettings_shape);")
+    py.contains("class ResourceSpec(_Closed):\n")
+    py.contains("model_config = ConfigDict(extra=\"allow\")")
+    reference.contains("Admits keys it does not declare")
+  }
+  ["a rule beyond a value test is an if, a not, an anyOf, or a comparison written out per value"] {
+    // `contains` is an array holding a member; `ForbiddenUnless` is the else.
+    local policy = schema("presence").properties["policies"].additionalProperties
+    policy.allOf.length == 2
+    policy.allOf.first.`if`.required == List("deny")
+    policy.allOf.first.`if`.properties["deny"].type == "array"
+    policy.allOf.first.`if`.properties["deny"].contains.`enum` == List("egress")
+    policy.allOf.first.then.required == List("dnsEgress")
+    policy.allOf.last.`else`.not.required == List("dnsEgress")
+    // Two forbidden paths: none of them, one `not` over an `anyOf`.
+    local exporter = schema("presence").properties["exporters"].additionalProperties
+    exporter.allOf.first.then.not.anyOf.length == 2
+    exporter.allOf.first.then.not.anyOf.first.required == List("endpoint")
+    exporter.allOf.first.then.not.anyOf.last.properties["file"].required == List("path")
+    // At least one of: an anyOf of required, a dotted path nested.
+    local quota = schema("presence").properties["quotas"].additionalProperties
+    quota.allOf.first.anyOf.length == 3
+    quota.allOf.first.anyOf.first.required == List("reason")
+    quota.allOf.first.anyOf.last.properties["contact"].required == List("email")
+    schema("presence").allOf.first.anyOf.length == 2
+    // A comparison between a value and the entries of a map is written out for
+    // each member of the reference's enum, and for both booleans.
+    local security = schema("presence").properties["security"]
+    security.allOf.first.allOf.length == 3
+    local first = security.allOf.first.allOf.first
+    first.`if`.required == List("level")
+    first.`if`.properties["level"].`const` == "privileged"
+    local entries = first.then.properties["namespaces"].additionalProperties
+    entries.`if`.required == List("level")
+    entries.`if`.properties["level"].not.`const` == "privileged"
+    entries.then.required == List("reason")
+    schema("presence").properties["switches"].allOf.first.allOf.length == 2
+    zod.contains("for (const [name, entry] of Object.entries(")
+    py.contains("for _name, _entry in (_at(self, [\"namespaces\"]) or {}).items():")
+    reference.contains(
+      "- For every entry of `namespaces` whose `level` differs from `level`, `reason` are required.",
+    )
+    reference.contains("- At least one of `reason`, `owner`, `contact.email` is required.")
+    reference.contains("- Unless `deny` contains `egress`, `dnsEgress` are not allowed.")
+  }
+  ["a constant is a const, a union of it with an object an anyOf, and neither admits true"] {
+    local ns = schema("union").properties["namespace"]
+    ns.anyOf.length == 2
+    ns.anyOf.first.`const` == false
+    ns.anyOf.first.toMap().length == 1
+    ns.anyOf.last.type == "object"
+    schema("showcase").properties["falseOnly"].`const` == false
+    zod.contains("export const FalseOnly = z.literal(false);")
+    zod.contains("namespace: z.union([FalseOnly, z.lazy(() => UnionNamespace)]).optional()")
+    py.contains("FalseOnly = Annotated[bool, AfterValidator(_one_of([False]))]")
+    reference.contains("always `false`")
   }
   ["a union with a list in it keeps the items, the keys and the bound of each member"] {
     schema("union").properties["names"].anyOf.length == 2
@@ -311,6 +419,13 @@ facts {
     reference.contains("| `region` | NonEmptyString | yes |  | at least 1 character |")
     // `@SetAtInstall` keeps its marker.
     schema("blocks").properties["vault"].properties["token"]["x-set-at-install"] == true
+  }
+  ["a property that narrows an alias with a bound of its own is spelled out, not a $ref that loses it"] {
+    local selectors = Helm.valuesSchema(Model.chartOf(DefsChart)!!).properties["selectors"]
+    selectors.minProperties == 1
+    !selectors.toMap().containsKey("$ref")
+    Helm.valuesSchema(Model.chartOf(DefsChart)!!).properties["labels"]["$ref"]
+      == "#/$defs/stringMap"
   }
   ["a chart's own definitions are at the root of its values schema, and an empty one is not written"] {
     local chart = Helm.valuesSchema(Model.chartOf(DefsChart)!!)

@@ -412,3 +412,210 @@ class NullableOk {
   @A.Nullable
   size: Int?
 }
+
+// ------------------------------------------------------ keys, open, constants
+
+/// A key that carries a bound no key can render.
+class IntegerKey {
+  /// A port as a key.
+  ports: Mapping<V.Port, String>?
+}
+
+/// A key that is not a string at all.
+class PlainIntKey {
+  /// Whole numbers as keys.
+  numbers: Mapping<Int, String>?
+}
+
+/// A string alias with a count on it: no key renders that.
+@A.Items { min = 1 }
+typealias CountedKey = String
+
+/// A key of that alias.
+class CountedKeyed {
+  /// Keyed by it.
+  m: Mapping<CountedKey, String>?
+}
+
+/// A key with every rule a key renders.
+@A.Length { min = 2; max = 4 }
+@A.NotPattern {
+  regex = "^x"
+  reason = "no x"
+  invalid { "xy" }
+}
+typealias RenderedKey = String(length >= 2, length <= 4, !contains(Regex("^x")))
+
+/// A map of it.
+class RenderedKeyed {
+  /// Keyed by it.
+  m: Mapping<RenderedKey, String>?
+}
+
+/// `@Open` on a property.
+class OpenOnProperty {
+  /// Wrong place.
+  @A.Open
+  x: Dynamic?
+}
+
+/// `@Const` on a property.
+class ConstOnProperty {
+  /// Wrong place.
+  @A.Const { value = false }
+  flag: Boolean?
+}
+
+/// A rule annotation on a property.
+class RuleOnProperty {
+  /// Wrong place.
+  @A.RequiredAnyOf { paths { "a"; "b" } }
+  x: String?
+}
+
+/// `@Const` with a value that is not its type.
+@A.Const { value = 1 }
+typealias ConstWrongType = Boolean(this == true)
+
+/// A class that admits other keys, and one that extends it.
+@A.Open
+open class OpenBase {
+  /// A field.
+  a: Int?
+}
+
+/// Extends it, and is open too.
+class OpenChild extends OpenBase {
+  /// Another.
+  b: Int?
+}
+
+/// `contains` on something that is not a list.
+@A.RequiredWhen {
+  property = "flag"
+  contains { true }
+  require { "value" }
+}
+class ContainsOnScalar {
+  /// The flag.
+  flag: Boolean?
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// `in` and `contains` together.
+@A.RequiredWhen {
+  property = "flags"
+  `in` { true }
+  contains { true }
+  require { "value" }
+}
+class InAndContains {
+  /// The flags.
+  flags: Listing<Boolean>?
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// A list that defaults to a member of the condition.
+@A.RequiredWhen {
+  property = "flags"
+  contains { true }
+  require { "value" }
+}
+class ContainsDefault {
+  /// The flags.
+  flags: Listing<Boolean> = new { true }
+  /// The value.
+  value: V.NonEmptyString?
+}
+
+/// A forbidden path with a default.
+@A.ForbiddenWhen {
+  property = "flag"
+  `in` { true }
+  forbid { "value" }
+}
+class ForbidDefault {
+  /// The flag.
+  flag: Boolean?
+  /// The value.
+  value: V.NonEmptyString = "x"
+}
+
+/// One alternative.
+@A.RequiredAnyOf { paths { "a" } }
+class AnyOfOne {
+  /// A.
+  a: String?
+}
+
+/// Alternatives, one of which is not a property.
+@A.RequiredAnyOf { paths { "a"; "typo" } }
+class AnyOfUnknown {
+  /// A.
+  a: String?
+}
+
+/// A comparison of an enum with a boolean.
+@A.RequiredWhenDiffers {
+  property = "level"
+  each = "items"
+  entryProperty = "on"
+  require { "reason" }
+}
+class DiffersMixedKinds {
+  /// The reference.
+  level: ("a" | "b")?
+  /// The entries.
+  items: Mapping<String, DiffersEntry>?
+}
+
+/// An entry.
+class DiffersEntry {
+  /// Its level.
+  level: ("a" | "b")?
+  /// A flag.
+  on: Boolean?
+  /// Why.
+  reason: String?
+}
+
+/// A comparison over something that is not a map of classes.
+@A.RequiredWhenDiffers {
+  property = "level"
+  each = "items"
+  require { "reason" }
+}
+class DiffersEachNotMap {
+  /// The reference.
+  level: ("a" | "b")?
+  /// A list, not a map.
+  items: Listing<DiffersEntry>?
+}
+
+/// A reference with a default.
+@A.RequiredWhenDiffers {
+  property = "level"
+  each = "items"
+  require { "reason" }
+}
+class DiffersDefault {
+  /// The reference.
+  level: "a" | "b" = "a"
+  /// The entries.
+  items: Mapping<String, DiffersEntry>?
+}
+
+/// A comparison that is sound.
+@A.RequiredWhenDiffers {
+  property = "level"
+  each = "items"
+  require { "reason" }
+}
+class DiffersSound {
+  /// The reference.
+  level: ("a" | "b")?
+  /// The entries.
+  items: Mapping<String, DiffersEntry>?
+}

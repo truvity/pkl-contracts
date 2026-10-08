@@ -1,0 +1,39 @@
+/// Maps whose KEYS carry rules: every rule of the key type must reach the
+/// schema's `propertyNames`, not only its pattern. A name that must not start
+/// with a prefix (`@A.NotPattern`), a name with a length (`@A.Length`, the
+/// vocabulary's `DnsLabel` has one), and a key made of both. Pkl enforces the
+/// key type on every entry; each schema engine, zod and pydantic must refuse the
+/// same keys.
+@A.Schema { id = "https://example.com/schemas/keys.json"; title = "keys" }
+module conformance.contract.Keys
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// Priority classes by name. A name starts with a lower-case letter or digit, and
+/// never with `system-`: Kubernetes reserves the prefix.
+priorityClasses: Mapping<PriorityName, V.NonEmptyString>?
+
+/// Namespaces by name: a DNS label, at most 63 characters (the vocabulary's own).
+namespaces: Mapping<V.DnsLabel, V.NonEmptyString>?
+
+/// Codes of two to four characters, whatever they are.
+codes: Mapping<Code, Int>?
+
+/// A lower-case name that does not start with `system-`.
+@A.Pattern {
+  regex = "^[a-z0-9][-a-z0-9]*$"
+  valid { "web"; "a-b"; "9" }
+  invalid { "Web"; "-web"; "" }
+}
+@A.NotPattern {
+  regex = "^system-"
+  reason = "the prefix `system-` is reserved"
+  invalid { "system-x"; "system-" }
+}
+typealias PriorityName =
+  String(matches(Regex("^[a-z0-9][-a-z0-9]*$")) && !contains(Regex("^system-")))
+
+/// Two to four characters.
+@A.Length { min = 2; max = 4 }
+typealias Code = String(length >= 2, length <= 4)

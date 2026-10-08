@@ -1,0 +1,4 @@
+owner: o
+quotas:
+  a: {reason: r, hard: x}
+  b: {hard: x}

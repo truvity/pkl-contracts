@@ -8,8 +8,15 @@
 /// `maxProperties`, `@NotPattern` is one `not: { pattern }` each under `allOf`, a
 /// union is `anyOf` (below), and `@RequiredWhen`
 /// and `@RequiredUnless` are an `if` with a `then` or an `else`, over nested
-/// `properties` and `required` for a dotted path. `@Range`'s `exclusiveMin` and
-/// `exclusiveMax` are `exclusiveMinimum` and `exclusiveMaximum`.
+/// `properties` and `required` for a dotted path (`contains` is `type: array` and
+/// `contains: { enum }` in the `if`); `@ForbiddenWhen` and `@ForbiddenUnless` the
+/// same with `not: { required }`; `@RequiredAnyOf` is an `anyOf` of `required`;
+/// `@RequiredWhenDiffers` is one `if` and `then` for each value the reference may
+/// have, down through the map's `additionalProperties`. `@Range`'s `exclusiveMin`
+/// and `exclusiveMax` are `exclusiveMinimum` and `exclusiveMaximum`. `@Open` leaves
+/// out `additionalProperties: false`, and `@Const` is `const`. A map's key type is
+/// `propertyNames` WHOLE: its pattern, `@NotPattern`s, length and format, or its
+/// enum.
 ///
 /// Semantics every generator of this repository must give, and how this one
 /// gives them (decision 0010 of the policy repository):
@@ -65,27 +72,53 @@ local const function withValues(d: Dynamic, n: Model.Node): Dynamic = (d) {
   when (n.numericValues != null) { `enum` = n.numericValues }
 }
 
-/// `propertyNames` for a map or an open object: what its key type says (a
-/// pattern, an enum) and the keys `@DenyKeys` refuses, as one schema, joined by
-/// `allOf` when there are several (both need `not`, which a schema has once).
+/// What a string node says, as keywords: its length, its pattern (with the
+/// line-break guard), its format and the expressions it must not match
+/// (`@NotPattern`, one `not: { pattern }` each under `allOf`, because a schema has
+/// `not` once and the guard is already it). The `type` is the caller's: a property
+/// is `type: string`, and a key (`propertyNames`) is a string already.
+local function stringRules(n: Model.Node): Dynamic = new Dynamic {
+  when (n.length?.min != null) { minLength = n.length.min }
+  when (n.length?.max != null) { maxLength = n.length.max }
+  when (n.pattern != null) {
+    pattern = n.pattern.regex
+    // The guard stays unless the contract declared the value multi-line.
+    when (!n.multiLine) { not = noLineBreak }
+  }
+  when (n.format != null) { format = n.format.name }
+  when (!n.notPatterns.isEmpty) {
+    allOf = n.notPatterns.map((p) -> new Dynamic { not = new Dynamic { pattern = p.regex } })
+  }
+}
+
+/// The schema of a map's key type, or null when it says nothing: a string's rules
+/// (all of them: pattern, `@NotPattern`, length, format), an enum's members, a
+/// union's `anyOf`. The model refuses a key annotation that is none of these.
+local function keySchema(k: Model.Node): Dynamic? =
+  if (k.kind == "enum")
+    new Dynamic { `enum` = k.values }
+  else if (k.kind == "string")
+    let (r = stringRules(k))
+      if (r.toMap().isEmpty) null else r
+  else if (k.kind == "union")
+    let (ms = k.members.map((m) -> keySchema(m)))
+      // A member that says nothing admits every key, and so does the union.
+      if (ms.any((m) -> m == null)) null else new Dynamic { anyOf = ms }
+  else
+    null
+
+/// `propertyNames` for a map or an open object: what its key type says and the
+/// keys `@DenyKeys` refuses, as one schema, joined by `allOf` when there are
+/// several (both need `not`, which a schema has once).
 local function propertyNames(n: Model.Node): Dynamic? =
   let (
     parts =
       (
-        if (n.kind == "map" && n.key.pattern != null)
-          List(new Dynamic {
-            pattern = n.key.pattern.regex
-            when (!n.key.multiLine) { not = noLineBreak }
-          })
+        if (n.kind == "map" && keySchema(n.key) != null)
+          List(keySchema(n.key))
         else
           List()
       )
-        + (
-          if (n.kind == "map" && n.key.kind == "enum")
-            List(new Dynamic { `enum` = n.key.values })
-          else
-            List()
-        )
         + (
           if (n.denyKeys == null)
             List()
@@ -114,24 +147,13 @@ function ofNode(n: Model.Node): Dynamic =
     body(n)
 
 local function body(n: Model.Node): Dynamic =
-  if (n.kind == "enum")
+  if (n.constant != null)
+    // The value says the type; a union of it with an object is `anyOf` below.
+    new Dynamic { `const` = n.constant.value }
+  else if (n.kind == "enum")
     new Dynamic { `enum` = n.values }
   else if (n.kind == "string")
-    (new Dynamic { type = "string" }) {
-      when (n.length?.min != null) { minLength = n.length.min }
-      when (n.length?.max != null) { maxLength = n.length.max }
-      when (n.pattern != null) {
-        pattern = n.pattern.regex
-        // The guard stays unless the contract declared the value multi-line.
-        when (!n.multiLine) { not = noLineBreak }
-      }
-      when (n.format != null) { format = n.format.name }
-      // `@NotPattern`: one `not: { pattern }` for each rule, joined by `allOf`
-      // because a schema has `not` once and the line-break guard is already it.
-      when (!n.notPatterns.isEmpty) {
-        allOf = n.notPatterns.map((p) -> new Dynamic { not = new Dynamic { pattern = p.regex } })
-      }
-    }
+    (new Dynamic { type = "string" }) { ...stringRules(n) }
   else if (n.kind == "integer")
     withValues(bounds(new Dynamic { type = "integer" }, n.range), n)
   else if (n.kind == "number")
@@ -174,6 +196,7 @@ local function body(n: Model.Node): Dynamic =
           && m.itemBounds == null
           && m.propertyBounds == null
           && m.requiresKeys == null
+          && m.constant == null
           && m.kind != "enum"
           && m.kind != "object"
           && m.kind != "list"
@@ -185,11 +208,15 @@ local function body(n: Model.Node): Dynamic =
     else
       new Dynamic { anyOf = n.members.map((m) -> ofNode(m)) }
   else if (n.kind == "object")
-    (objectBody(n.cls, "additionalProperties")) {
+    (objectBody(n.cls, closer(n.cls))) {
       when (!conditionsOf(n).isEmpty) { allOf = conditionsOf(n).map((c) -> conditional(c)) }
     }
   else
     new Dynamic {}
+
+/// The keyword that refuses an undeclared key of an object class, or empty for a
+/// class that admits them (`@Open`).
+function closer(c: Model.Cls): String = if (c.undeclaredKeys) "" else "additionalProperties"
 
 /// The schema a `@Def` node is stored under in `$defs`: its own body, whereas
 /// `ofNode` of it is the `$ref` to that entry.
@@ -233,22 +260,79 @@ local function present(paths: List<List<String>>): Dynamic =
       required = names
     }
 
-/// A rule across fields (`@RequiredWhen`, `@RequiredUnless`). The condition is an
-/// `if` that holds only where every step of the path is there and the value is
-/// one of those listed, so a document that leaves it out does not match. `When`
-/// then requires the paths; `Unless` requires them in the `else`.
-local function conditional(r: Model.Condition): Dynamic =
-  let (test = along(r.path, new Dynamic { `enum` = r.values }))
-    if (r.unless)
+/// A schema that says the value at `path` is what `leaf` says, WITHOUT requiring
+/// it to be there: `properties` at each step. Used where the surrounding rule has
+/// already decided the path matters (the entries of a map below a step).
+local function through(path: List<String>, leaf: Dynamic): Dynamic = new Dynamic {
+  properties = new Dynamic {
+    [path.first] = if (path.length > 1) through(path.drop(1), leaf) else leaf
+  }
+}
+
+/// The schema that says no path of `paths` is present: each one is absent (a
+/// dotted path is absent when any step of it is).
+local function absent(paths: List<List<String>>): Dynamic =
+  if (paths.length == 1)
+    new Dynamic { not = present(paths) }
+  else
+    new Dynamic { not = new Dynamic { anyOf = paths.map((p) -> present(List(p))) } }
+
+/// The condition of a rule that tests a value (`@RequiredWhen` and the others): the
+/// value at the path is one of those listed, or, for `contains`, an array that
+/// holds one of them. It holds only where every step of the path is there.
+local function holds(r: Model.Condition): Dynamic =
+  along(
+    r.path,
+    if (r.`test` == "contains")
       new Dynamic {
-        `if` = test
-        `else` = present(r.paths)
+        type = "array"
+        contains = new Dynamic { `enum` = r.`values` }
       }
     else
-      new Dynamic {
-        `if` = test
-        then = present(r.paths)
-      }
+      new Dynamic { `enum` = r.`values` },
+  )
+
+/// `@RequiredWhenDiffers`: JSON Schema cannot compare two values, so the rule is
+/// written once for each value the reference may have. Where the reference is `m`,
+/// every entry of the map that sets its value and sets it to something else needs
+/// the paths.
+local function differs(r: Model.Condition): Dynamic = new Dynamic {
+  allOf =
+    r.`values`.map((m) -> new Dynamic {
+      `if` = along(r.path, new Dynamic { `const` = m })
+      then =
+        through(r.eachPath, new Dynamic {
+          additionalProperties = new Dynamic {
+            `if` = along(r.entryPath, new Dynamic { not = new Dynamic { `const` = m } })
+            then = present(r.paths)
+          }
+        })
+    })
+}
+
+/// A rule across fields. A value test (`@RequiredWhen`, `@RequiredUnless`,
+/// `@ForbiddenWhen`, `@ForbiddenUnless`) is an `if` that holds only where every
+/// step of the path is there and the value is one of those listed (or the array
+/// holds one), so a document that leaves it out does not match. `When` then
+/// requires (or forbids) the paths; `Unless` does in the `else`. `@RequiredAnyOf`
+/// is an `anyOf` of one `required` each, and `@RequiredWhenDiffers` is `differs`.
+local function conditional(r: Model.Condition): Dynamic =
+  if (r.kind == "anyOf")
+    new Dynamic { anyOf = r.paths.map((p) -> present(List(p))) }
+  else if (r.kind == "differs")
+    differs(r)
+  else
+    let (effect = if (r.kind == "forbid") absent(r.paths) else present(r.paths))
+      if (r.unless)
+        new Dynamic {
+          `if` = holds(r)
+          `else` = effect
+        }
+      else
+        new Dynamic {
+          `if` = holds(r)
+          then = effect
+        }
 
 /// The schema `{ type: "null" }`, a member of the `anyOf` of a nullable property
 /// whose type cannot take the `type: [<t>, "null"]` form.
@@ -268,7 +352,7 @@ local nullSchema: Dynamic = new Dynamic { type = "null" }
 ///     `null` to an `enum`.
 local function orNull(s: Dynamic): Dynamic =
   let (m = s.toMap())
-    if (m.containsKey("$ref"))
+    if (m.containsKey("$ref") || m.containsKey("const"))
       new Dynamic { anyOf = List(s, nullSchema) }
     else if (m.containsKey("anyOf"))
       (s) { anyOf = s.anyOf.toList() + List(nullSchema) }
@@ -334,7 +418,12 @@ function documentIn(n: Model.Node, standalone: Boolean): Dynamic =
     inner =
       objectBody(
         n.cls,
-        if (n.cls.isOpen) "" else if (hasBase) "unevaluatedProperties" else "additionalProperties",
+        if (n.cls.isOpen || n.cls.undeclaredKeys)
+          ""
+        else if (hasBase)
+          "unevaluatedProperties"
+        else
+          "additionalProperties",
       )
   )
     new Dynamic {

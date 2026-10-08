@@ -25,6 +25,7 @@ import "@vocab/Annotations.pkl"
 import "@vocab/Check.pkl"
 import "@vocab/Vocab.pkl"
 
+import "conformance/contract/Presence.pkl"
 import "LintFixtures.pkl"
 import "Showcase.pkl"
 
@@ -265,6 +266,71 @@ facts {
       .catch(() -> Model.declNode(LintFixtures, "RuleOnAliasOfString").cls.props.length)
       .contains("for an alias of a class")
   }
+  ["a key type carries what a schema can say of a string, and the rest is refused, not dropped"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "IntegerKey").cls.props.first.type.key.kind)
+      .contains("carries @Range, which a key cannot render")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "PlainIntKey").cls.props.first.type.key.kind)
+      .contains("a key of a document is a string")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "CountedKeyed").cls.props.first.type.key.kind)
+      .contains("carries @Items, which a key cannot render")
+    // A key with a length and a rule it must not match is accepted whole.
+    local key = Model.declNode(LintFixtures, "RenderedKeyed").cls.props.first.type.key
+    key.length.min == 2
+    key.length.max == 4
+    key.notPatterns.length == 1
+  }
+  ["@Open is for a class and @Const for an alias, and a rule for a class; on a property each is refused"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "OpenOnProperty").cls.props.length)
+      .contains("@Open is for a class or a module, not a property")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ConstOnProperty").cls.props.length)
+      .contains("@Const is for an alias, not a property")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "RuleOnProperty").cls.props.length)
+      .contains("@RequiredAnyOf is for a class, a module or an alias of a class, not a property")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ConstWrongType").constant)
+      .contains("@Const is the one value of a boolean, a string or a number")
+  }
+  ["a class that extends an open class is open"] {
+    Model.declNode(LintFixtures, "OpenBase").cls.undeclaredKeys
+    Model.declNode(LintFixtures, "OpenChild").cls.undeclaredKeys
+    !Model.declNode(LintFixtures, "Sound").cls.undeclaredKeys
+  }
+  ["the rules beyond a value test are resolved against the contract, and what cannot be is refused"] {
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ContainsOnScalar").cls.conditions.length)
+      .contains("`contains` is a condition on a list")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "InAndContains").cls.conditions.length)
+      .contains("`in` and `contains` are two conditions; give one")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ContainsDefault").cls.conditions.length)
+      .contains("defaults to [true], a value of the condition")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "ForbidDefault").cls.conditions.length)
+      .contains("has a default, so it is always present to Pkl and never forbidden")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "AnyOfOne").cls.conditions.length)
+      .contains("at least two paths")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "AnyOfUnknown").cls.conditions.first.paths)
+      .contains("`typo` names no property")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "DiffersMixedKinds").cls.conditions.length)
+      .contains("they are compared, so they are the same kind of value")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "DiffersEachNotMap").cls.conditions.length)
+      .contains("`each` is a map of a class")
+    module
+      .catch(() -> Model.declNode(LintFixtures, "DiffersDefault").cls.conditions.length)
+      .contains("the reference has none")
+    Model.declNode(LintFixtures, "DiffersSound").cls.conditions.first.values == List("a", "b")
+  }
   ["a sound rule is read in full: both kinds, nested paths, the converse"] {
     local conds = Model.declNode(LintFixtures, "Sound").cls.conditions
     conds.length == 2
@@ -296,6 +362,38 @@ facts {
       .catch(() -> Check.checked(new LintFixtures.Sound {}))
       .contains("`inner.value` is required unless `flag` is `true`")
     Check.problems(new LintFixtures.Sound { flag = true }).isEmpty
+  }
+  ["the rules beyond a value test are enforced by Pkl, with the path of each entry in the message"] {
+    // A comparison with the entries of a map: only the entry that differs, and
+    // only while the reference is set.
+    Check.problems(new Presence.Security {
+      level = "restricted"
+      namespaces {
+        ["a"] = new Presence.Namespace { level = "restricted" }
+        ["b"] = new Presence.Namespace { level = "privileged" }
+        ["c"] = new Presence.Namespace { level = "baseline"; reason = "r" }
+        ["d"] = new Presence.Namespace {}
+      }
+    })
+      == List("`namespaces[b].reason` is required when its `level` differs from `level`")
+    Check
+      .problems(new Presence.Security {
+        namespaces { ["b"] = new Presence.Namespace { level = "privileged" } }
+      })
+      .isEmpty
+    // `contains` and the forbidden path, in both branches.
+    Check.problems(new Presence.Policy { deny { "egress" } })
+      == List("`dnsEgress` is required when `deny` contains `egress`")
+    Check.problems(new Presence.Policy { deny { "egress" }; dnsEgress = false }).isEmpty
+    Check.problems(new Presence.Policy { deny { "ingress" }; dnsEgress = false })
+      == List("`dnsEgress` is not allowed unless `deny` contains `egress`")
+    Check.problems(new Presence.Policy { deny { "ingress" } }).isEmpty
+    // At least one of.
+    Check.problems(new Presence.Quota { hard = "x" })
+      == List("at least one of `reason`, `owner`, `contact.email` is required")
+    Check
+      .problems(new Presence.Quota { hard = "x"; contact = new Presence.Contact { email = "e" } })
+      .isEmpty
   }
   ["denied keys and exclusive bounds are enforced by Pkl"] {
     Check.problems((Showcase) { labels { ["severity"] = "x" } }).length == 1

@@ -1,0 +1,9 @@
+priorityClasses:
+  web: high
+  a-b: low
+  "9": x
+namespaces:
+  team-a: x
+codes:
+  ab: 1
+  abcd: 2

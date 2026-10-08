@@ -1,0 +1,4 @@
+owner: o
+policies:
+  a: {deny: [egress], dnsEgress: true}
+  b: {deny: [ingress], dnsEgress: true}

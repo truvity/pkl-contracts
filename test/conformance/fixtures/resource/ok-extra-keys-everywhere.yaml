@@ -1,0 +1,18 @@
+spec:
+  nodeSelector: {matchLabels: {a: b}}
+  instances:
+    - name: a
+      asn: 64512
+      localPort: 179
+      peers:
+        - name: p
+          peerASN: 64513
+          peerConfigRef: {name: x}
+  ref:
+    name: x
+    namespace: y
+  replicas: 2
+peers:
+  p:
+    name: p
+    anything: [1, 2]

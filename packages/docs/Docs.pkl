@@ -35,6 +35,12 @@ local function classSection(c: Model.Cls, n: Model.Node): String =
     + (if (c.doc != null) "\(c.doc)\n\n" else "")
     + (if (c.base != null) "Extends `\(c.base.cls.qname)`.\n\n" else "")
     + (
+      if (c.undeclaredKeys)
+        "Admits keys it does not declare (the fields below are checked, nothing else is).\n\n"
+      else
+        ""
+    )
+    + (
       if (n.schema != null)
         "Document `\(n.schema.id)`.\n\n"
       else

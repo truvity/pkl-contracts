@@ -5,6 +5,83 @@ per tag. The prose bullets are written for a consumer; the commit subjects under
 them are the GitHub Release's own list. All packages are released together
 under one version, so a heading covers all of them.
 
+## Unreleased
+
+Four things a consumer's hand-written schema said that a contract could not, and a
+bug that hid one of them. Everything is additive except the first entry, which
+makes a schema refuse keys it used to admit.
+
+### Breaking
+
+- **Breaking: a map key's rules now reach `propertyNames`, all of them.** The key
+  type of a `Mapping` was written to `propertyNames` as its `@A.Pattern` and
+  nothing else: an `@A.NotPattern`, an `@A.Length` (the vocabulary's own `DnsLabel`
+  has a 63-character one) or an `@A.Format` on the key alias was accepted by the
+  model and dropped, so the JSON Schema admitted keys that Pkl, zod and pydantic
+  refused. The generated `propertyNames` now carries `minLength`/`maxLength`, one
+  `not: { pattern }` for each `@A.NotPattern` (under `allOf`), the format, and the
+  line-break guard as before; a key that is an enum is its members, a union of key
+  types an `anyOf`. A schema that was generated for a contract with such a key
+  alias narrows to what the contract always meant; the worked example and the
+  vocabulary's own contracts are unchanged. And the model now REFUSES a key type
+  that carries an annotation no generator can write (`@A.Range`, `@A.Items`,
+  `@A.Properties`, `@A.RequiresKeys`, `@A.OneOfValues`, `@A.Const`, a rule across
+  fields), or that is not a string, an enum or a union of them, instead of
+  dropping it. Fixtures: `fixtures/keys`.
+
+- **Breaking: a property's own bound over a `@A.Def` alias is no longer lost.**
+  `@A.Properties { min = 1 }` (or `@Range`, `@Length`, `@Items`, `@DenyKeys`) on a
+  property whose type is an alias carrying `@A.Def` spelled the property out in zod
+  and pydantic but wrote JSON Schema as `$ref` to the definition, so the bound
+  reached the other generators and not the schema. The property is now written out
+  in the schema too (the definition is still emitted for the other uses). A
+  document the bound refuses is now refused by the schema as well.
+
+### Features
+
+- **`@A.Open`: an object that is typed and not closed.** On a class (or a module).
+  Its declared properties are typed and the required ones required, and the object
+  admits keys it does not declare: JSON Schema leaves out `additionalProperties:
+  false`, zod is a `looseObject`, pydantic `extra="allow"` (and leaves the values of
+  undeclared keys alone, `null` included), the reference says so, and the test
+  loader accepts them. Until now only a `@Schema` document could be open. A class
+  that extends an open one is open; a class beside it stays closed. A Pkl-authored
+  value sets declared properties only (Pkl cannot give a typed object another).
+  The model refuses `@Open` on a property. Fixtures: `fixtures/resource`.
+- **Rules across fields, four more.**
+  - `contains { ... }` in `@A.RequiredWhen` and `@A.RequiredUnless`, in place of
+    `in`: the condition is a list that holds one of the values (JSON Schema
+    `{ type: array, contains: { enum } }` in the `if`).
+  - `@A.ForbiddenWhen` and `@A.ForbiddenUnless { property; in | contains; forbid }`:
+    the paths must be ABSENT (`not: { required }`; several are `not: { anyOf }`).
+    Beside a `@A.RequiredWhen` they are the `else` of an `if`: "`deny` contains
+    `egress` requires `dnsEgress`, and otherwise forbids it".
+  - `@A.RequiredAnyOf { paths }`: at least one of two or more paths is present
+    (`anyOf` of `required`).
+  - `@A.RequiredWhenDiffers { property; each; entryProperty; require }`: for every
+    entry of the map at `each`, when the entry sets `entryProperty` to a value that
+    differs from `property` here, the entry must carry `require`. "A namespace whose
+    level departs from the default level needs a reason". JSON Schema writes it once
+    for each member of the reference's enum (or `true` and `false`), through the
+    map's `additionalProperties`; zod, pydantic and Pkl compare the values.
+  They share the paths and the limits of `@A.RequiredWhen` (a property with no
+  default, no block with a default on the way) and `Check` enforces them in Pkl;
+  zod and pydantic say them in the same `superRefine` and `model_validator`; the
+  reference lists each. What cannot be resolved is a generation error. Fixtures:
+  `fixtures/presence`.
+- **`@A.Const` and `V.FalseOnly`: "false, or this object".** `V.FalseOnly` is the
+  boolean `false` and nothing else (Pkl has no boolean literal type, and
+  `Boolean | Namespace` would admit `true`); `(V.FalseOnly | Namespace)?` is JSON
+  Schema `anyOf: [{ const: false }, <object>]`, zod `z.union([z.literal(false),
+  ...])`, pydantic `Annotated[bool, ...] | Namespace`. `true`, `0`, `"false"` and
+  `null` are refused by every validator. `@A.Const { value }` is the general
+  annotation, on a boolean, string or number alias; the model refuses it on a
+  property or with a value that is not the alias's type. Fixtures: `fixtures/union`.
+- The model refuses a rule annotation, `@A.Open` or `@A.Const` on a property, where
+  each would be dropped.
+- The new contracts and their fixtures (`keys`, `resource`, `presence`, and the `namespace` ones of `union`: 124 fixtures)
+  are in the conformance suite: all nine validators agree on each.
+
 ## v0.6.0 — 2026-10-08
 
 Everything here is additive: a contract that uses none of it generates exactly
