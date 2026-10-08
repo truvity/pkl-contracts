@@ -33,6 +33,10 @@
 ///     its message;
 ///   - a union is `z.union`, which, like JSON Schema's `anyOf`, accepts a value
 ///     that is any member (see `JsonSchema`);
+///   - `@Open` is a `looseObject`, `@Const` a `z.literal`, and a rule across fields
+///     of any kind (`@ForbiddenWhen`, `@RequiredAnyOf`, `@RequiredWhenDiffers`) a
+///     statement of the same `superRefine`; a map key's rules are the key
+///     alias's own (`z.record` takes it by name);
 ///   - `@Nullable` is `.nullable()` on the property (and it stays optional, or
 ///     keeps its default); `@MultiLine` leaves out the `noLineBreak` refinement
 ///     of its node; `@OneOfValues` is a `refine` that tests membership.
@@ -149,7 +153,9 @@ local function expr(n: Model.Node): String =
     inner(n)
 
 local function inner(n: Model.Node): String =
-  if (n.kind == "string")
+  if (n.constant != null)
+    "z.literal(\(lit(n.constant.value)))"
+  else if (n.kind == "string")
     "z.string()"
       + (if (n.length?.min != null) ".min(\(n.length.min))" else "")
       + (if (n.length?.max != null) ".max(\(n.length.max))" else "")
@@ -216,21 +222,51 @@ local function allConditions(c: Model.Cls): List<Model.Condition> =
 /// A path as an array of keys.
 local function pathLit(p: List<String>): String = "[\(p.map((k) -> lit(k)).join(", "))]"
 
+/// The test of a rule (`@RequiredWhen` and the others) on the value `v` read at its
+/// path: the value is one of those listed, or, for `contains`, an array holding
+/// one.
+local function holds(d: Model.Condition, v: String): String =
+  if (d.`test` == "contains")
+    "(Array.isArray(\(v)) && \(v).some((x) => (\(lit(d.`values`)) as unknown[]).includes(x)))"
+  else
+    "(\(lit(d.`values`)) as unknown[]).includes(\(v))"
+
+/// The statements of one rule, inside `superRefine((o, ctx) => { ... })`.
+local function ruleStatements(d: Model.Condition): String =
+  if (d.kind == "anyOf")
+    "    if (!\(pathLit2(d.paths)).some((p) => at(o, p) !== undefined)) {\n"
+      + "      ctx.addIssue({ code: \"custom\", message: \(lit(Model.conditionPhrase(d))) });\n"
+      + "    }\n"
+  else if (d.kind == "differs")
+    "    const ref = at(o, \(pathLit(d.path)));\n"
+      + "    if (ref !== undefined) {\n"
+      + "      for (const [name, entry] of Object.entries((at(o, \(pathLit(d.eachPath))) ?? {}) as Record<string, unknown>)) {\n"
+      + "        const v = at(entry, \(pathLit(d.entryPath)));\n"
+      + "        if (v === undefined || v === ref) continue;\n"
+      + "        for (const p of \(pathLit2(d.paths))) {\n"
+      + "          if (at(entry, p) === undefined) ctx.addIssue({ code: \"custom\", path: [...\(pathLit(d.eachPath)), name, ...p], message: \(lit(Model.conditionPhrase(d))) });\n"
+      + "        }\n"
+      + "      }\n"
+      + "    }\n"
+  else
+    "    if (\(if (d.unless) "!" else "")\(holds(d, "at(o, \(pathLit(d.path)))"))) {\n"
+      + "      for (const p of \(pathLit2(d.paths))) {\n"
+      + "        if (at(o, p) \(if (d.kind == "forbid") "!==" else "===") undefined) ctx.addIssue({ code: \"custom\", path: p, message: \(lit(Model.conditionPhrase(d))) });\n"
+      + "      }\n"
+      + "    }\n"
+
 /// The refinements for rules across fields: one `superRefine` that reads each
 /// condition's path and, where the rule applies, reports every required path
-/// that is absent, at that path.
+/// that is absent (or forbidden path that is there), at that path.
 local function conditionRefine(conds: List<Model.Condition>): String =
   if (conds.isEmpty)
     ""
   else
     ".superRefine((o, ctx) => {\n"
+      // A comparison declares constants, so it gets a block of its own.
       + conds
         .map((d) ->
-          "    if (\(if (d.unless) "!" else "")(\(lit(d.values)) as unknown[]).includes(at(o, \(pathLit(d.path))))) {\n"
-            + "      for (const p of \(pathLit2(d.paths))) {\n"
-            + "        if (at(o, p) === undefined) ctx.addIssue({ code: \"custom\", path: p, message: \(lit(Model.conditionPhrase(d))) });\n"
-            + "      }\n"
-            + "    }\n"
+          if (d.kind == "differs") "  {\n" + ruleStatements(d) + "  }\n" else ruleStatements(d)
         )
         .join("")
       + "  })"
@@ -244,7 +280,7 @@ local function classDef(c: Model.Cls): String =
     + (if (c.base != null) "  ...\(c.base.cls.qname)_shape,\n" else "")
     + c.props.map((p) -> field(p)).join("")
     + "};\n"
-    + "export const \(c.qname) = z.\(if (c.isOpen) "looseObject" else "strictObject")(\(c.qname)_shape)\(conditionRefine(allConditions(c)));\n"
+    + "export const \(c.qname) = z.\(if (c.isOpen || c.undeclaredKeys) "looseObject" else "strictObject")(\(c.qname)_shape)\(conditionRefine(allConditions(c)));\n"
     + "export type \(c.qname) = z.infer<typeof \(c.qname)>;\n\n"
 
 local function aliasDef(n: Model.Node): String =

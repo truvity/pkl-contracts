@@ -1,0 +1,7 @@
+spec:
+  note: null
+  deep: {a: {b: [null, 1]}}
+  instances:
+    - name: a
+      asn: 1
+      skipped: null

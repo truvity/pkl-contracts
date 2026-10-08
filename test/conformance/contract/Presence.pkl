@@ -1,0 +1,189 @@
+/// Rules across fields beyond a value test: at least one of several keys, a
+/// key that must be absent, a condition on a list that holds a value, and a
+/// comparison between a value of an object and the same kind of value in the
+/// entries of one of its maps.
+///
+/// Every validator must read each rule alike, in both branches and where the
+/// document never says.
+@A.Schema { id = "https://example.com/schemas/presence.json"; title = "presence" }
+@A.RequiredAnyOf { paths { "owner"; "team" } }
+module conformance.contract.Presence
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// Who owns the install (one of `owner` and `team` is required).
+owner: V.NonEmptyString?
+
+/// The team that does.
+team: V.NonEmptyString?
+
+/// Quotas by name; a reason, an owner or a contact email is needed.
+quotas: Mapping<String, Quota>?
+
+/// Policies by name; egress needs a DNS decision, anything else forbids one.
+policies: Mapping<String, Policy>?
+
+/// Exporters by name.
+exporters: Mapping<String, Exporter>?
+
+/// Access by name; anything but `public` needs an owner.
+access: Mapping<String, Access>?
+
+/// Pod security by namespace.
+security: Security?
+
+/// Switches against entries.
+switches: Switches?
+
+/// A quota. At least one of the reason, the owner or the contact's email.
+@A.RequiredAnyOf { paths { "reason"; "owner"; "contact.email" } }
+class Quota {
+  /// What it is for.
+  reason: V.NonEmptyString?
+
+  /// Who owns it.
+  owner: V.NonEmptyString?
+
+  /// How to reach whoever does.
+  contact: Contact?
+
+  /// The limits.
+  hard: V.NonEmptyString
+}
+
+/// A contact.
+class Contact {
+  /// Their email.
+  email: V.NonEmptyString?
+}
+
+/// A policy. `dnsEgress` is required when `deny` holds `egress`, and forbidden
+/// otherwise.
+@A.RequiredWhen {
+  property = "deny"
+  contains { "egress" }
+  require { "dnsEgress" }
+}
+@A.ForbiddenUnless {
+  property = "deny"
+  contains { "egress" }
+  forbid { "dnsEgress" }
+}
+class Policy {
+  /// The directions denied; at least one, each once.
+  @A.Items { min = 1; unique = true }
+  @A.Required
+  deny: Listing<"ingress" | "egress">?
+
+  /// Whether DNS stays open for egress.
+  dnsEgress: Boolean?
+}
+
+/// An exporter. A `disabled` exporter has no endpoint and no path; `insecure` is only
+/// for `otlp`.
+@A.ForbiddenWhen {
+  property = "kind"
+  `in` { "disabled" }
+  forbid { "endpoint"; "file.path" }
+}
+@A.ForbiddenUnless {
+  property = "kind"
+  `in` { "otlp" }
+  forbid { "insecure" }
+}
+class Exporter {
+  /// What it exports to.
+  @A.Required
+  kind: ("disabled" | "otlp" | "file")?
+
+  /// Where, for otlp.
+  endpoint: V.NonEmptyString?
+
+  /// Without TLS; otlp only.
+  insecure: Boolean?
+
+  /// A file.
+  file: ExporterFile?
+}
+
+/// A file.
+class ExporterFile {
+  /// Its path.
+  path: V.NonEmptyString?
+}
+
+/// Access. Unless `tags` holds `public`, an owner is required.
+@A.RequiredUnless {
+  property = "tags"
+  contains { "public" }
+  require { "owner" }
+}
+class Access {
+  /// Tags.
+  tags: Listing<AccessTag>?
+
+  /// Who owns it.
+  owner: V.NonEmptyString?
+}
+
+typealias AccessTag = "public" | "internal"
+
+/// Pod security. A namespace whose level departs from the default level needs a
+/// reason.
+@A.RequiredWhenDiffers {
+  property = "level"
+  each = "namespaces"
+  require { "reason" }
+}
+class Security {
+  /// The default level.
+  level: Level?
+
+  /// Namespaces by name.
+  namespaces: Mapping<V.DnsLabel, Namespace>?
+}
+
+typealias Level = "privileged" | "baseline" | "restricted"
+
+/// A namespace.
+class Namespace {
+  /// Its level; absent is the default.
+  level: Level?
+
+  /// Why it departs.
+  reason: V.NonEmptyString?
+}
+
+/// A boolean reference compared with a differently named value of the entries.
+@A.RequiredWhenDiffers {
+  property = "strict"
+  each = "items"
+  entryProperty = "setting"
+  require { "note"; "who.name" }
+}
+class Switches {
+  /// The default.
+  strict: Boolean?
+
+  /// Entries by name.
+  items: Mapping<String, Switch>?
+}
+
+/// An entry.
+class Switch {
+  /// Its own setting.
+  setting: Boolean?
+
+  /// Why it differs.
+  note: V.NonEmptyString?
+
+  /// Who decided.
+  who: Who?
+}
+
+/// Who.
+class Who {
+  /// Their name.
+  name: V.NonEmptyString?
+}

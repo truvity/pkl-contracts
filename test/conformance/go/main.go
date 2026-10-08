@@ -30,13 +30,16 @@ import (
 	"conformance.invalid/gen/conditions"
 	"conformance.invalid/gen/declared"
 	"conformance.invalid/gen/installed"
+	"conformance.invalid/gen/keys"
 	"conformance.invalid/gen/literals"
 	"conformance.invalid/gen/logarchiver"
 	"conformance.invalid/gen/migrate"
 	"conformance.invalid/gen/names"
 	"conformance.invalid/gen/platform"
+	"conformance.invalid/gen/presence"
 	"conformance.invalid/gen/prober"
 	"conformance.invalid/gen/redirect"
+	"conformance.invalid/gen/resource"
 	"conformance.invalid/gen/shortener"
 	"conformance.invalid/gen/showcase"
 	"conformance.invalid/gen/stat"
@@ -74,6 +77,9 @@ var structs = map[string]func() any{
 	"conditions": func() any { return &conditions.Conditions{} },
 	"declared":   func() any { return &declared.Declared{} },
 	"names":      func() any { return &names.Names{} },
+	"keys":       func() any { return &keys.Keys{} },
+	"resource":   func() any { return &resource.Resource{} },
+	"presence":   func() any { return &presence.Presence{} },
 	"literals":   func() any { return &literals.Literals{} },
 	"union":      func() any { return &union.Union{} },
 	"platform":   func() any { return &platform.Platform{} },

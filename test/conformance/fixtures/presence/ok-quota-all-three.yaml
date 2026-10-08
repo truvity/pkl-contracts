@@ -1,0 +1,3 @@
+owner: o
+quotas:
+  a: {reason: r, owner: o, contact: {email: e}, hard: x}

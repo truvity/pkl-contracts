@@ -1,0 +1,3 @@
+owner: o
+exporters:
+  a: {kind: otlp, endpoint: e, insecure: true, file: {path: p}}

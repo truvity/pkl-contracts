@@ -26,6 +26,10 @@ namespaces: Listing<V.NonEmptyString | Namespace>?
 /// members, which `anyOf` accepts as Pkl does, and `oneOf` would refuse.
 either: (First | Second)?
 
+/// False, or a namespace: `false` says there is none to render, an object says
+/// what it is. `true` is neither, which `Boolean | Namespace` would admit.
+namespace: (V.FalseOnly | Namespace)?
+
 /// A namespace with labels.
 class Namespace {
   /// The namespace's name.

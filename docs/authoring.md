@@ -18,7 +18,7 @@ alias there, where it is reviewed once and used by every contract.
 *Checked by:* `hack/lint.sh`, on the source: no `Regex(`, no constrained type
 (`String(length >= 1)`), no `typealias` and no `@A.Pattern` outside the
 vocabulary. Two exceptions, both data a generator can read: a rule across
-fields, an alias annotated `@A.RequiredWhen` or `@A.RequiredUnless` (the TLS
+fields, an alias annotated with one of the rules of the next-but-some section (`@A.RequiredWhen`, `@A.RequiredUnless`, `@A.ForbiddenWhen`, `@A.ForbiddenUnless`, `@A.RequiredAnyOf`, `@A.RequiredWhenDiffers`; the TLS
 fragment's "a mode other than `off` needs the whole identity"; a class or a module
 carries the same annotations with no alias, see "A rule across fields"), and a
 bound on a property, which is the next section but one.
@@ -126,6 +126,38 @@ in zod and pydantic. JSON Schema says `propertyNames: { not: { enum: [...] } }`
 (joined by `allOf` with the key type's own `propertyNames`, for a map keyed by a
 pattern or an enum), zod a `refine` on the record, pydantic an `AfterValidator`, Pkl
 `Check`. Keys are compared as written: a key is denied by its exact name.
+
+## A map's keys: the key type's rules
+
+The key type of a `Mapping` is a type like any other, and **every rule it states
+reaches the schema's `propertyNames`**: its `@A.Pattern` (with the line-break
+guard), each `@A.NotPattern`, its `@A.Length`, its `@A.Format`, or, for an enum, its
+members; a union of those is an `anyOf`.
+
+```pkl
+/// Priority classes by name, but never `system-` ones: Kubernetes reserves them.
+priorityClasses: Mapping<PriorityName, V.NonEmptyString>?
+```
+
+```json
+"propertyNames": {
+  "pattern": "^[a-z0-9][-a-z0-9]*$",
+  "not": { "pattern": "[\\n\\r\\f\\x0B\\x85\u2028\u2029]" },
+  "allOf": [ { "not": { "pattern": "^system-" } } ]
+}
+```
+
+A key rule that the generator cannot write is **refused**, not dropped: the model
+stops with the key type and the annotation (`@A.Range`, `@A.OneOfValues`,
+`@A.Items`, `@A.Properties`, `@A.RequiresKeys`, `@A.Const`, a rule across fields,
+or a key that is not a string, an enum or a union of them). Before this was so, an
+annotation on a key alias was accepted and left out of `propertyNames`, so the
+schema admitted a key that Pkl, zod and pydantic refused. zod and pydantic always
+had the rules: they refer to the key alias by name.
+
+*Checked by:* `fixtures/keys` (a prefix that must not match, a key of 63 and of 64
+characters, two to four characters, a line break at the end of a key, by every
+validator), `test/GeneratorsTest.pkl`, `test/LintTest.pkl` (the refusals).
 
 ## A count on a list or a map: `@A.Items` and `@A.Properties`
 
@@ -268,6 +300,94 @@ alias's rule is Pkl's through the alias's own constraint, as it always was.
 `Check` against Pkl, and the conformance contract `conditions` (a module and a
 class, a boolean and an enum, both branches and the absent one, nested required
 paths, fixtures under `fixtures/conditions`).
+
+### More rules across fields
+
+The same annotations, with the same paths and the same limits, say five more
+things. Each keeps to what a schema and Pkl can say alike.
+
+**A list that holds a value: `contains`.** `@A.RequiredWhen`, `@A.RequiredUnless`
+(and the two below) take `contains { ... }` in place of `in { ... }`, for a
+property that is a list of enum members or of booleans: the condition holds when
+the list holds at least one of the values. An absent list holds none. Never both
+`in` and `contains`.
+
+**Forbidden paths: `@A.ForbiddenWhen` and `@A.ForbiddenUnless`.** The converse of
+a requirement: every path of `forbid` must be ABSENT when (or unless) the
+condition holds. Beside a `@A.RequiredWhen` it is the `else` of an `if`:
+
+```pkl
+/// A policy that denies egress says what to do about DNS; one that does not may not.
+@A.RequiredWhen { property = "deny"; contains { "egress" }; require { "dnsEgress" } }
+@A.ForbiddenUnless { property = "deny"; contains { "egress" }; forbid { "dnsEgress" } }
+class Policy {
+  @A.Required
+  deny: Listing<"ingress" | "egress">?
+  dnsEgress: Boolean?
+}
+```
+
+JSON Schema, for the two together:
+
+```json
+"allOf": [
+  { "if": { "properties": { "deny": { "type": "array", "contains": { "enum": ["egress"] } } },
+            "required": ["deny"] },
+    "then": { "required": ["dnsEgress"] } },
+  { "if": { "properties": { "deny": { "type": "array", "contains": { "enum": ["egress"] } } },
+            "required": ["deny"] },
+    "else": { "not": { "required": ["dnsEgress"] } } }
+]
+```
+
+(`type: array` is in the `if` because `contains` ignores a value that is not an
+array.) Two forbidden paths are `not: { anyOf: [ { required: [a] }, { required: [b] } ] }`.
+A forbidden path is a property with no default, for the reason a required one is.
+
+**At least one of: `@A.RequiredAnyOf { paths { "reason"; "owner" } }`.** On a
+class, a module or an alias of a class: at least two dotted paths, one of which
+must be present. JSON Schema `anyOf: [{ required: [reason] }, { required: [owner] }]`
+(a dotted path is nested `properties` and `required`).
+
+**A comparison with the entries of a map: `@A.RequiredWhenDiffers`.** "A namespace
+whose level departs from the default level needs a reason" compares a value of the
+object with the same kind of value in each entry of one of its maps, which a path
+through blocks cannot say and which "is one of" cannot express either:
+
+```pkl
+@A.RequiredWhenDiffers { property = "level"; each = "namespaces"; require { "reason" } }
+class PodSecurity {
+  level: Level?
+  namespaces: Mapping<V.DnsLabel, Namespace>?
+}
+```
+
+For every entry of the map at `each`: when the entry sets `entryProperty` (default:
+the same name as `property`) to a value that **differs** from the value of
+`property` here, the entry must carry the paths of `require` (paths below the
+entry). `property` is the reference: when it is not set, the rule does not apply,
+and an entry that does not set its value is the same as the reference and needs
+nothing. Both are an enum or both a boolean (the entry's enum may have more
+members), neither has a default, and `each` is a dotted path through blocks to a
+`Mapping` of a class, which has no default with entries. JSON Schema cannot compare
+two values, so it writes the rule once for each member of the reference's type:
+`if level is "privileged"`, `then` every entry of `namespaces` `if` its `level` is
+set and `not` `"privileged"` `then` requires `reason`, and again for `baseline` and
+`restricted` (for a boolean, `true` and `false`). zod, pydantic and Pkl compare the
+values; the result is the same.
+
+How the new rules are said elsewhere. zod: the same `superRefine`, a statement each
+(`at(o, path) !== undefined` for a forbidden path; a loop over `Object.entries` for
+a comparison). pydantic: the same `model_validator`. Pkl: `Check` reads the
+annotations and reports the entry (`namespaces[b].reason` is required when ...).
+The reference lists each in words.
+
+*Checked by:* the conformance contract `presence` (`fixtures/presence`: both
+branches of each rule, the absent case, every member of the reference's enum, both
+booleans, nested paths), `test/LintTest.pkl` (what is refused: `contains` on a
+scalar, `in` with `contains`, a default on a forbidden path or a reference, one
+alternative, a comparison of an enum with a boolean or over a list) and
+`test/GeneratorsTest.pkl` (the schema shapes).
 
 ## The vocabulary's newer types
 
@@ -485,6 +605,67 @@ never combined with `@A.SetAtInstall` or `@A.Nullable`.
 *Checked by:* `test/LintTest.pkl`, `test/GeneratorsTest.pkl` and the `declared`
 fixtures (a document without each of the three, with `null` and with an empty
 list is refused by every validator).
+
+### An object that is typed and not closed: `@A.Open`
+
+A class is closed: its schema is `additionalProperties: false`, zod is a strict
+object and pydantic forbids extras. An object a chart renders verbatim (the `spec`
+of a custom resource) names the fields the contract needs checked, types them,
+requires some, and leaves the rest to the resource. `@A.Open` on the class (or the
+module) says so:
+
+```pkl
+@A.Open
+class BgpInstance {
+  name: V.NonEmptyString
+  @A.Range { min = 1; max = 4294967295 }
+  localASN: Int
+  peers: Listing<BgpPeer>?
+}
+```
+
+JSON Schema is `type: object`, `required` and `properties`, and no
+`additionalProperties`; zod a `looseObject`; pydantic `extra="allow"`; the
+reference says "Admits keys it does not declare". A class that extends an open
+class (one that is not a document of its own) is open too. A class a property
+refers to is closed unless it is open itself: openness is the class's, and a closed
+class beside an open one stays closed.
+
+What an undeclared key holds is not looked at (any value, `null` included), in every
+validator. It is a fact about DOCUMENTS: a value written in Pkl is a typed object,
+Pkl cannot give it a property its class does not declare, so a Pkl-authored value
+sets the declared properties only. (An object with no declared properties is
+`Dynamic`, open already.) Only on a class or a module: on a property the model
+refuses it, because it would be dropped.
+
+*Checked by:* the conformance contract `resource` (`fixtures/resource`: extra keys
+at every depth, `null` among them, required fields missing, a wrong type, a bound,
+and a closed block beside the open ones), `test/GeneratorsTest.pkl`,
+`test/LintTest.pkl`.
+
+### A constant: `@A.Const`, and "false or this object"
+
+Pkl has no boolean literal type, so a switch that is `false` or an object that
+configures it (`namespace: false` for "someone else's", `namespace: { ... }` for
+"this one") cannot be written `false | Namespace`, and `Boolean | Namespace` admits
+`true`. The vocabulary has the alias that says it, `V.FalseOnly`:
+
+```pkl
+namespace: (V.FalseOnly | Namespace)?
+```
+
+JSON Schema `anyOf: [{ const: false }, <the object>]`, zod
+`z.union([FalseOnly, ...])` with `FalseOnly = z.literal(false)`, pydantic
+`Annotated[bool, AfterValidator(_one_of([False]))] | Namespace`. `true`, `0`, `"false"`
+and `null` are refused by every validator (pydantic is strict about the type, because
+Python reads `0 == False`). The alias is `@A.Const { value = false }` over a Pkl
+constraint `this == false`; `@A.Const` is the general annotation, for a boolean, a
+string or a number alias (`const` alone says the type), and the model refuses a
+value that is not the alias's type and the annotation on a property. The probes run
+the alias's constraint against its annotation like any other.
+
+*Checked by:* `fixtures/union` (`namespace`: `false`, an object, `true`, `0`, `"false"`,
+`null`, `{}`), the showcase probes, `test/GeneratorsTest.pkl`.
 
 ### A chart's own `@Def`
 

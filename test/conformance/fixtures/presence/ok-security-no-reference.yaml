@@ -1,0 +1,4 @@
+owner: o
+security:
+  namespaces:
+    a: {level: privileged}

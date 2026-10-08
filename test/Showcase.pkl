@@ -67,6 +67,7 @@ openObject: V.OpenObject?
 named: V.Named?
 mounted: V.Mounted?
 nonEmptyObject: V.NonEmptyObject?
+falseOnly: V.FalseOnly?
 
 // Properties that narrow a type with their own bound (`@A.Range`, `@A.Length`),
 // as a contract does where a field's rule is not worth an alias. The bound is the

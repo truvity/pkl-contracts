@@ -316,7 +316,25 @@ function probesOf(n: Model.Node): List<Probe> =
         List()
     )
     + (
-      if (n.kind == "integer" && n.range == null)
+      if (n.constant != null)
+        List(ok("the constant", n.constant.value))
+          + (
+            if (n.kind == "boolean")
+              List(
+                bad("the other boolean", !n.constant.value),
+                bad("a string for a boolean", "\(n.constant.value)"),
+                bad("a number for a boolean", if (n.constant.value) 1 else 0),
+              )
+            else if (n.kind == "string")
+              List(bad("another string", n.constant.value + "x"), bad("a number for a string", 1))
+            else
+              List(bad("another number", n.constant.value + 1), bad("a string for a number", "1"))
+          )
+      else
+        List()
+    )
+    + (
+      if (n.kind == "integer" && n.range == null && n.constant == null)
         List(ok("an integer", 3), bad("a string for an integer", "3"))
       else
         List()

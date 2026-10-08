@@ -1,0 +1,3 @@
+spec:
+  instances:
+    - {name: a, asn: "1"}

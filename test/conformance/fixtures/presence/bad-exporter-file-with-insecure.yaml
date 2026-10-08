@@ -1,0 +1,3 @@
+owner: o
+exporters:
+  a: {kind: file, insecure: true}

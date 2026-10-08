@@ -1,0 +1,5 @@
+owner: o
+switches:
+  strict: false
+  items:
+    a: {setting: true, who: {name: w}}

@@ -1,0 +1,3 @@
+owner: o
+exporters:
+  a: {kind: file, endpoint: e, file: {path: p}}

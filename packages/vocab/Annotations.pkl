@@ -240,6 +240,9 @@ class Format extends Annotation {
 ///
 /// `in` holds strings for an enum and booleans for a boolean.
 ///
+/// The condition is `in` (the value at `property` is one of them) or `contains`
+/// (see below), never both.
+///
 /// On a class or a module `contracts.vocab.Check` makes Pkl enforce it; on an
 /// alias the alias's own constraint does, as it always has (the alias writes
 /// the rule once more as a lambda).
@@ -249,6 +252,12 @@ class RequiredWhen extends Annotation {
 
   /// The values of `property` that make `require` mandatory.
   `in`: Listing<String | Boolean>
+
+  /// The condition on a LIST instead: `property` is a list of enum members (or
+  /// of booleans) and the rule applies when the list holds at least one of
+  /// these values. An absent list holds none. JSON Schema is
+  /// `{ type: array, contains: { enum: [...] } }` under the `if`.
+  contains: Listing<String | Boolean>
 
   /// The paths that must then be present.
   require: Listing<String>
@@ -266,7 +275,93 @@ class RequiredUnless extends Annotation {
   /// The values of `property` that excuse `require`.
   `in`: Listing<String | Boolean>
 
+  /// The condition on a list instead, as for `RequiredWhen`: the paths are
+  /// required unless the list at `property` holds one of these values.
+  contains: Listing<String | Boolean>
+
   /// The paths that are mandatory otherwise.
+  require: Listing<String>
+}
+
+/// The converse of `RequiredWhen` for absence: when the condition holds, every
+/// path in `forbid` must be ABSENT. The same paths, limits and enforcement as
+/// `RequiredWhen` (a dotted path through blocks; a path with no default, because
+/// a default is always there to Pkl and never there to a schema validator), and
+/// the same two conditions, `in` and `contains`.
+///
+/// Beside a `RequiredWhen` it is the "else" of an `if`: `deny` contains `egress`
+/// requires `dnsEgress` and otherwise forbids it is a `RequiredWhen` and a
+/// `ForbiddenUnless` on the same condition. JSON Schema is the `if` with
+/// `then: { not: { required: [...] } }`.
+class ForbiddenWhen extends Annotation {
+  /// The path of the property that decides.
+  property: String
+
+  /// The values of `property` that make `forbid` illegal.
+  `in`: Listing<String | Boolean>
+
+  /// The condition on a list instead: the list at `property` holds one of these.
+  contains: Listing<String | Boolean>
+
+  /// The paths that must then be absent.
+  forbid: Listing<String>
+}
+
+/// Every path in `forbid` must be absent UNLESS the condition holds: a document
+/// that does not set `property` at all is therefore forbidden them. See
+/// `ForbiddenWhen`.
+class ForbiddenUnless extends Annotation {
+  /// The path of the property that excuses.
+  property: String
+
+  /// The values of `property` that excuse `forbid`.
+  `in`: Listing<String | Boolean>
+
+  /// The condition on a list instead: the list at `property` holds one of these.
+  contains: Listing<String | Boolean>
+
+  /// The paths that must be absent otherwise.
+  forbid: Listing<String>
+}
+
+/// At least one of `paths` must be present: "a reason or an owner". Written on a
+/// class, a module or an alias of a class, like `RequiredWhen`, with the same
+/// dotted paths, the same limit (a path with no default) and the same enforcement.
+/// JSON Schema is `anyOf: [{ required: [a] }, { required: [b] }]`. Two paths at
+/// least; one would be `@Required`.
+class RequiredAnyOf extends Annotation {
+  /// The paths, one of which must be present.
+  paths: Listing<String>
+}
+
+/// A comparison between a value of this object and the same kind of value in the
+/// ENTRIES of one of its maps, which no path through blocks can say: for every
+/// entry of the map at `each`, when the entry sets `entryProperty` to a value that
+/// DIFFERS from the value of `property` here, the entry must carry every path of
+/// `require`.
+///
+/// Both properties are an enum or both a boolean (the entry's enum may have more
+/// members), neither has a default, and `each` is a dotted path through blocks to
+/// a `Mapping` of a class. `property` is the REFERENCE: when this object does not
+/// set it, the rule does not apply, and an entry that does not set `entryProperty`
+/// is the same as the reference and needs nothing. `entryProperty` defaults to
+/// `property`; `require` are paths below the entry.
+///
+/// JSON Schema cannot compare two values, so it is written out once for each
+/// member of the reference's type: `if <property> is m` then every entry `if
+/// <entryProperty> is set and is not m` `then` requires `require`. Pkl, zod and
+/// pydantic compare the two values directly; the result is the same.
+class RequiredWhenDiffers extends Annotation {
+  /// The path of the reference value.
+  property: String
+
+  /// The path of the map whose entries are held to it.
+  each: String
+
+  /// The path, below an entry, of the value compared with the reference.
+  entryProperty: String = property
+
+  /// The paths below the entry that it must then carry.
   require: Listing<String>
 }
 
@@ -295,4 +390,38 @@ class Def extends Annotation {
 class Chart extends Annotation {
   /// The values schema's `title`.
   title: String
+}
+
+/// A class (or a module) whose instances may carry keys it does not declare. Its
+/// declared properties are typed, and the required ones required, but the object
+/// is not closed: JSON Schema leaves out `additionalProperties: false` (and
+/// `unevaluatedProperties`), zod is a `looseObject` and pydantic `extra="allow"`.
+/// For an object a chart takes verbatim, such as the `spec` of a custom resource
+/// of which the contract names only the fields it needs checked.
+///
+/// A key the class does not declare is any value at all, `null` included, and is
+/// never read; it is a fact about DOCUMENTS. A value written in Pkl is a typed
+/// object, and Pkl cannot give a typed object a property its class does not have,
+/// so a Pkl-authored value sets the declared properties only (an open object
+/// with no declared properties is `Dynamic`, which is open already). Only on a
+/// class or a module; a property cannot be open on its own, because the class
+/// has one shape wherever it is used. A class that extends an open class (one that
+/// is not a document of its own) is open too.
+class Open extends Annotation {}
+
+/// A constant: the one value a boolean, a string or a number alias may be. JSON
+/// Schema `const` (alone: it says the type), zod `z.literal`, pydantic
+/// `Literal`. Pkl has no boolean literal type (`false | Namespace` does not
+/// parse), so the vocabulary's `FalseOnly` is an alias with the constraint
+/// `this == false` and this annotation, and "false or this object" is the union
+/// `(V.FalseOnly | Namespace)?`: JSON Schema `anyOf: [{ const: false }, <object>]`,
+/// and `true` is refused by every validator. The alias writes the constraint as
+/// a lambda too (the probes run the two against each other).
+///
+/// On an ALIAS only; the model refuses it on a property, where it would be
+/// dropped. The value is the alias's type: a boolean for `Boolean`, a whole
+/// number for `Int`, any number for `Number`, a string for `String`.
+class Const extends Annotation {
+  /// The only value allowed.
+  value: Boolean | String | Number
 }

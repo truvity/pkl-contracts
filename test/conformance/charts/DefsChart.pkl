@@ -21,6 +21,11 @@ labels: StringMap = new Mapping { ["app"] = "defs" }
 /// Annotations for every object.
 annotations: StringMap = new Mapping {}
 
+/// Selectors: the same map of strings, narrowed with a bound of its own (at least
+/// one), which a `$ref` to the definition would lose.
+@A.Properties { min = 1 }
+selectors: StringMap?
+
 /// Who owns the release.
 owner: Owner
 

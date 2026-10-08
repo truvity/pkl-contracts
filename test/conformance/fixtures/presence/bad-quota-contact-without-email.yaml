@@ -1,0 +1,3 @@
+owner: o
+quotas:
+  a: {contact: {}, hard: x}

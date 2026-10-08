@@ -78,6 +78,10 @@ CHART_EDITS = {
         ("bad", "owner-without-name", lambda v: put(v, ["owner", "name"], None)),
         ("bad", "owner-unknown-key", lambda v: put(v, ["owner", "pager"], "x")),
         ("ok", "owner-contact", lambda v: put(v, ["owner", "contact"], "ops")),
+        # A property that narrows a `@Def` alias with a bound of its own is spelled
+        # out, not a `$ref` to the definition (which would lose the bound).
+        ("ok", "selectors-one", lambda v: put(v, ["selectors", "app"], "web")),
+        ("bad", "selectors-empty", lambda v: put(v, ["selectors"], {})),
     ],
     "cond": [
         ("bad", "host-missing", lambda v: put(v, ["database", "host"], None)),

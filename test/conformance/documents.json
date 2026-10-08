@@ -17,5 +17,8 @@
   "union": {"schema": "union.json", "module": "conformance/union/Union.pkl"},
   "shortener": {"schema": "shortener.json", "module": "conformance/contract/Shortener.pkl"},
   "platform": {"schema": "fragments/platform.json", "module": "conformance/PlatformRef.pkl"},
-  "showcase": {"schema": "showcase.json", "module": "Showcase.pkl"}
+  "showcase": {"schema": "showcase.json", "module": "Showcase.pkl"},
+  "keys": {"schema": "keys.json", "module": "conformance/contract/Keys.pkl"},
+  "resource": {"schema": "resource.json", "module": "conformance/contract/Resource.pkl"},
+  "presence": {"schema": "presence.json", "module": "conformance/contract/Presence.pkl"}
 }

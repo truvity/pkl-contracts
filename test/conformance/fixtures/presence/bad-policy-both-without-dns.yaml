@@ -1,0 +1,3 @@
+owner: o
+policies:
+  a: {deny: [ingress, egress]}

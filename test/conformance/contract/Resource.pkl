@@ -1,0 +1,72 @@
+/// An object that is typed and not closed: the shape of a custom resource's spec
+/// that a chart renders verbatim, of which the contract names only the fields it
+/// needs checked. The declared properties are typed and the required ones
+/// required, an undeclared key is any value at all, and a class that is not
+/// open stays closed wherever it sits.
+@A.Schema { id = "https://example.com/schemas/resource.json"; title = "resource" }
+module conformance.contract.Resource
+
+import "@vocab/Annotations.pkl" as A
+import "@vocab/Vocab.pkl" as V
+
+/// The resource's spec. Required, and open.
+@A.Required
+spec: Spec?
+
+/// Peers by name, each an open object with a required name.
+peers: Mapping<String, Peer>?
+
+/// A closed block beside the open ones, so that closed stays closed.
+settings: Settings?
+
+/// The spec: instances are required, and keys beyond them are the resource's.
+@A.Open
+class Spec {
+  /// The instances; at least one.
+  @A.Items { min = 1 }
+  @A.Required
+  instances: Listing<Instance>?
+
+  /// The reference to a peer configuration; open as well.
+  ref: Ref?
+
+  /// How many replicas.
+  replicas: V.PositiveInt?
+}
+
+/// One instance.
+@A.Open
+class Instance {
+  /// Its name.
+  name: V.NonEmptyString
+
+  /// Its number, a 32-bit unsigned.
+  @A.Range { min = 1; max = 4294967295 }
+  asn: Int
+
+  /// Peers of the instance.
+  peers: Listing<Peer>?
+}
+
+/// A peer.
+@A.Open
+class Peer {
+  /// Its name.
+  name: V.NonEmptyString
+
+  /// Its address.
+  address: String?
+}
+
+/// A reference by name.
+@A.Open
+class Ref {
+  /// The name referred to.
+  name: String
+}
+
+/// Closed: an undeclared key is refused.
+class Settings {
+  /// A flag.
+  enabled: Boolean = false
+}

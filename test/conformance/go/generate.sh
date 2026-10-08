@@ -37,6 +37,9 @@ rm -rf gen
   --mapping conformance.contract.Literals=$pkg/literals \
   --mapping conformance.contract.Collections=$pkg/collections \
   --mapping conformance.contract.Declared=$pkg/declared \
+  --mapping conformance.contract.Keys=$pkg/keys \
+  --mapping conformance.contract.Resource=$pkg/resource \
+  --mapping conformance.contract.Presence=$pkg/presence \
   --mapping conformance.union.Union=$pkg/union \
   "$base/contracts.vocab@$version#/Vocab.pkl" \
   "$base/contracts.fragments@$version#/Fragments.pkl" \

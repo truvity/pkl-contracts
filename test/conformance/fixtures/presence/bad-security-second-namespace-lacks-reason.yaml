@@ -1,0 +1,6 @@
+owner: o
+security:
+  level: restricted
+  namespaces:
+    a: {level: baseline, reason: r}
+    b: {level: privileged}

@@ -180,23 +180,90 @@ local function valueAt(v: Any, segments: List<String>): Any =
 
 local function said(values: Listing): String = values.toList().map((x) -> "`\(x)`").join(" or ")
 
-/// What the conditional requirements of class `c` say is wrong with `v`.
+/// Whether the rule `d` (an annotation as data) holds for value `v` read at its
+/// property: `v` is one of `in`, or, for `contains`, a list that holds one of its
+/// values. An absent value (`null`) holds nothing.
+local function listed(d: Dynamic, v: Any): Boolean =
+  let (contained = (d.getPropertyOrNull("contains") ?? new Listing {}).toList())
+    if (contained.isEmpty)
+      d.`in`.toList().contains(v)
+    else
+      v != null && (if (v is Listing) v.toList() else v as List).any((x) -> contained.contains(x))
+
+/// "is one of" or "holds", for a message.
+local function holdsWord(d: Dynamic): String =
+  if ((d.getPropertyOrNull("contains") ?? new Listing {}).toList().isEmpty) "is" else "contains"
+
+local function wanted(d: Dynamic): Listing =
+  if ((d.getPropertyOrNull("contains") ?? new Listing {}).toList().isEmpty)
+    d.`in`
+  else
+    d.getProperty("contains")
+
+/// The entries of a map-valued `v`, or none.
+local function entriesOf(v: Any): List<Pair<Any, Any>> =
+  if (v == null) List() else if (v is Mapping) v.toMap().entries else v.toMap().entries
+
+/// What the rules across fields of class `c` say is wrong with `v`: `@RequiredWhen`
+/// and `@RequiredUnless` (a path that must be there), `@ForbiddenWhen` and
+/// `@ForbiddenUnless` (a path that must not be), `@RequiredAnyOf` and
+/// `@RequiredWhenDiffers`. "There" is "not `null`".
 local function conditionProblems(v: Any, c: reflect.Class, path: String): List<String> =
   chain(c)
     .flatMap((a) ->
       if (named(a, "RequiredWhen") || named(a, "RequiredUnless"))
         let (d = a.toDynamic())
         let (unless = named(a, "RequiredUnless"))
-        let (decides = d.`in`.toList().contains(valueAt(v, d.property.split("."))))
+        let (decides = listed(d, valueAt(v, d.property.split("."))))
           if (unless != decides)
             d.require
               .toList()
               .filter((r) -> valueAt(v, r.split(".")) == null)
               .map((r) ->
-                "`\(join(path, r))` is required \(if (unless) "unless" else "when") `\(join(path, d.property))` is \(said(d.`in`))"
+                "`\(join(path, r))` is required \(if (unless) "unless" else "when") `\(join(path, d.property))` \(holdsWord(d)) \(said(wanted(d)))"
               )
           else
             List()
+      else if (named(a, "ForbiddenWhen") || named(a, "ForbiddenUnless"))
+        let (d = a.toDynamic())
+        let (unless = named(a, "ForbiddenUnless"))
+        let (decides = listed(d, valueAt(v, d.property.split("."))))
+          if (unless != decides)
+            d.forbid
+              .toList()
+              .filter((r) -> valueAt(v, r.split(".")) != null)
+              .map((r) ->
+                "`\(join(path, r))` is not allowed \(if (unless) "unless" else "when") `\(join(path, d.property))` \(holdsWord(d)) \(said(wanted(d)))"
+              )
+          else
+            List()
+      else if (named(a, "RequiredAnyOf"))
+        let (d = a.toDynamic())
+          if (d.paths.toList().every((r) -> valueAt(v, r.split(".")) == null))
+            List(
+              "at least one of \(d.paths.toList().map((r) -> "`\(join(path, r))`").join(", ")) is required",
+            )
+          else
+            List()
+      else if (named(a, "RequiredWhenDiffers"))
+        let (d = a.toDynamic())
+        let (ref = valueAt(v, d.property.split(".")))
+          if (ref == null)
+            List()
+          else
+            entriesOf(valueAt(v, d.each.split(".")))
+              .flatMap((e) ->
+                let (seen = valueAt(e.second, (d.entryProperty as String).split(".")))
+                  if (seen == null || seen == ref)
+                    List()
+                  else
+                    d.require
+                      .toList()
+                      .filter((r) -> valueAt(e.second, r.split(".")) == null)
+                      .map((r) ->
+                        "`\(join(path, d.each))[\(e.first)].\(r)` is required when its `\(d.entryProperty)` differs from `\(join(path, d.property))`"
+                      )
+              )
       else
         List()
     )
