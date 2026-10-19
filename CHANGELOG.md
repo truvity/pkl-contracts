@@ -5,6 +5,10 @@ per tag. The prose bullets are written for a consumer; the commit subjects under
 them are the GitHub Release's own list. All packages are released together
 under one version, so a heading covers all of them.
 
+## v0.7.1 — 2026-10-19
+
+- Dependency updates.
+
 ## v0.7.0 — 2026-10-08
 
 Four things a consumer's hand-written schema said that a contract could not, and a
