@@ -24,6 +24,6 @@ permissions:
 
 jobs:
   vuln:
-    uses: truvity/ci-workflows/.github/workflows/check.yaml@690acf2363bb57e0af99d62bfe88c894a8f68f0a # v5.9.0
+    uses: truvity/ci-workflows/.github/workflows/check.yaml@30628c32c20aae538dcbf702c4abdd00e5f927f9 # v6.1.0
     with:
       recipes: '["vuln"]'
