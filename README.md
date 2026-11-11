@@ -145,16 +145,30 @@ files are in [`examples/service`](examples/service), which depends on the
 packages by path so that it builds from this checkout; `just example` renders it
 and compares the result with the committed `values.yaml`.
 
+## Platform part and company part
+
+**Platform part.** None. The packages are a build-time tool: nothing in this
+repository is deployed or run, so the platform admin applies nothing from it.
+
+**Company part.** A company's service repository writes its configuration
+contract and its chart values in Pkl against these packages, pins them at an
+exact version in its `PklProject`, and runs the generators at build time. The
+generated JSON Schema and types are what its service and chart are checked
+against ([docs/authoring.md](docs/authoring.md#generating),
+[docs/packaging.md](docs/packaging.md)).
+
 ## Consumers
 
 The surface is a Pkl project depending on the packages by their release URIs
 and running the generators. Inside this repository the consumers are the worked
 example (`examples/service`) and the conformance suite (`test/`), which depend on
-the packages by path. A first consuming repository is adopting the packages one
-chart at a time, and what it needs of the vocabulary and the generators is what
-this repository grows: the vocabulary types and the list and object keywords were
-added for it. Until a repository has moved its hand-written schemas over, those stay
-authoritative and the generated ones are compared with them.
+the packages by path. Outside it,
+[truvity/url-shortener](https://github.com/truvity/url-shortener), the worked
+example of the service contracts, is the first consumer: its Pkl project depends on `contracts.vocab`, `contracts.fragments` and
+`contracts.templates` by their release URIs. What it needs of the vocabulary
+and the generators is what this repository grows: the vocabulary types and the
+list and object keywords were added for it. Until a repository has moved its
+hand-written schemas over, those stay authoritative and the generated ones are compared with them.
 
 ## Neighbours
 
